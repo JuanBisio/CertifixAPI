@@ -21,10 +21,16 @@ export class SupabaseService {
 
     this.supabase = createClient(supabaseUrl, supabaseKey);
     if (serviceRoleKey) {
-      this.serviceClient = createClient(supabaseUrl, serviceRoleKey);
+      this.serviceClient = createClient(supabaseUrl, serviceRoleKey, {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      });
       this.logger.log('Supabase service-role client initialized');
     } else {
-      this.logger.warn('SUPABASE_SERVICE_ROLE_KEY not set; using anon client only');
+      // Throw error to debug if key is not being loaded
+      throw new Error('CRITICAL: SUPABASE_SERVICE_ROLE_KEY is missing. Backend cannot bypass RLS.');
     }
     this.logger.log('Supabase client initialized');
   }

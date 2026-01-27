@@ -204,7 +204,7 @@ export class SolicitudesService {
         .from('solicitudes_trabajo')
         .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono)')
         .eq('prestador_id', userId)
-        .in('estado', ['aceptado', 'finalizado'])
+        .in('estado', ['aceptado', 'pagado', 'finalizado'])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -226,6 +226,35 @@ export class SolicitudesService {
       this.logger.error(`Get my active error: ${error.message}`);
       throw new BadRequestException('Failed to fetch active work');
     }
+  }
+
+  async getHistory(userId: string, accessToken: string) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    
+    // Verify prestador
+    const { data: profile } = await supabase
+      .from('perfiles')
+      .select('rol')
+      .eq('id', userId)
+      .single();
+
+    if (profile?.rol !== 'prestador') {
+      throw new ForbiddenException('Only prestadores can access history');
+    }
+
+    const { data, error } = await supabase
+      .from('solicitudes_trabajo')
+      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .eq('prestador_id', userId)
+      .in('estado', ['finalizado', 'cerrado'])
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      this.logger.error(`Failed to fetch history: ${error.message}`);
+      throw new BadRequestException('Failed to fetch history');
+    }
+
+    return { solicitudes: data || [] };
   }
 
   async findOne(id: string, userId: string, accessToken: string) {
@@ -439,7 +468,7 @@ export class SolicitudesService {
     // Obtener postulacion
     const { data: postulacion } = await supabase
       .from('postulaciones')
-      .select('prestador_id, estado')
+      .select('prestador_id, estado, monto_ofertado')
       .eq('id', postulacionId)
       .eq('trabajo_id', trabajoId)
       .single();
@@ -472,6 +501,7 @@ export class SolicitudesService {
       .update({
         prestador_id: postulacion.prestador_id,
         estado: 'aceptado',
+        monto: postulacion.monto_ofertado, // Update price with accepted offer
       })
       .eq('id', trabajoId)
       .select('*, rubros(id, nombre, icono)')
@@ -536,7 +566,8 @@ export class SolicitudesService {
       // Validate state transitions
       const validTransitions: Record<string, string[]> = {
         buscando: ['aceptado'],
-        aceptado: ['finalizado'],
+        aceptado: ['pagado', 'finalizado'], // Can go to paid or finalized (if manual pay)
+        pagado: ['finalizado'],
         finalizado: ['cerrado'],
       };
 
@@ -599,6 +630,34 @@ export class SolicitudesService {
 
         if (expiresError) {
           this.logger.warn(`Could not set expires_at for evidencias of ${id}: ${expiresError.message}`);
+        }
+      }
+
+      // Payout Logic: When status changes to 'cerrado'
+      if (newState === 'cerrado') {
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('provider_amount, status')
+          .eq('solicitud_id', id)
+          .eq('status', 'completed')
+          .single();
+
+        if (payment && payment.provider_amount > 0) {
+          // Add to prestador balance
+          const svcClient = this.supabaseService.getServiceClient();
+          
+          await svcClient.rpc('increment_saldo', { 
+            user_id: solicitud.prestador_id, 
+            amount: payment.provider_amount 
+          });
+
+          // Update payment status to released
+          await svcClient
+            .from('payments')
+            .update({ status: 'released' })
+            .eq('solicitud_id', id);
+
+          this.logger.log(`Payout release for solicitud ${id}: ${payment.provider_amount} added to prestador ${solicitud.prestador_id}`);
         }
       }
 

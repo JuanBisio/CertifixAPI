@@ -69,6 +69,19 @@ export class SolicitudesController {
     return this.solicitudesService.getMyActive(user.id, accessToken);
   }
 
+  @Get('history')
+  @ApiOperation({ 
+    summary: 'Get work history for prestador',
+    description: 'Returns completed and closed work requests for the prestador'
+  })
+  async getHistory(
+    @CurrentUser() user: User,
+    @AccessToken() accessToken: string,
+  ) {
+    this.logger.log(`Get history for prestador: ${user.id}`);
+    return this.solicitudesService.getHistory(user.id, accessToken);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get specific work request' })
   @ApiResponse({ status: 200, description: 'Work request retrieved successfully' })

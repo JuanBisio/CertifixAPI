@@ -50,4 +50,26 @@ export class AdminController {
     const accessToken = (req as any).accessToken as string;
     return this.adminService.setDisponible(accessToken, id, dto.value);
   }
+
+  @Get('payments')
+  async listPayments(@Req() req: Request) {
+    const accessToken = (req as any).accessToken as string;
+    return this.adminService.listPayments(accessToken);
+  }
+
+  @Get('disputas')
+  async listDisputas(@Req() req: Request) {
+    const accessToken = (req as any).accessToken as string;
+    return this.adminService.listDisputas(accessToken);
+  }
+
+  @Patch('disputas/:id/resolve')
+  async resolveDisputa(
+    @Param('id') id: string,
+    @Body() dto: { resolution: string },
+    @Req() req: Request,
+  ) {
+    const accessToken = (req as any).accessToken as string;
+    return this.adminService.resolveDisputa(accessToken, id, dto.resolution);
+  }
 }

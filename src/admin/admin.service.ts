@@ -57,4 +57,56 @@ export class AdminService {
 
     return data;
   }
+
+  async listPayments(accessToken: string) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      this.logger.error(`Failed to list payments: ${error.message}`);
+      throw new BadRequestException('Failed to list payments');
+    }
+
+    return data || [];
+  }
+
+  async listDisputas(accessToken: string) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    const { data, error } = await supabase
+      .from('disputas')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      this.logger.error(`Failed to list disputas: ${error.message}`);
+      throw new BadRequestException('Failed to list disputas');
+    }
+
+    return data || [];
+  }
+
+  async resolveDisputa(accessToken: string, disputaId: string, resolution: string) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    
+    const newEstado = resolution === 'a_favor_cliente' 
+      ? 'resuelta_a_favor_cliente' 
+      : 'resuelta_a_favor_prestador';
+
+    const { data, error } = await supabase
+      .from('disputas')
+      .update({ estado: newEstado, updated_at: new Date().toISOString() })
+      .eq('id', disputaId)
+      .select('*')
+      .single();
+
+    if (error) {
+      this.logger.error(`Failed to resolve disputa: ${error.message}`);
+      throw new BadRequestException('Failed to resolve disputa');
+    }
+
+    return data;
+  }
 }

@@ -9,6 +9,7 @@ import { SolicitudesModule } from './solicitudes/solicitudes.module';
 import { EvidenciasModule } from './evidencias/evidencias.module';
 import { DisputasModule } from './disputas/disputas.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PaymentsModule } from './payments/payments.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AdminModule } from './admin/admin.module';
 import { WelcomeController } from './welcome.controller';
@@ -29,6 +30,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     EvidenciasModule,
     DisputasModule,
     NotificationsModule,
+    PaymentsModule,
     AdminModule,
   ],
   controllers: [WelcomeController],
