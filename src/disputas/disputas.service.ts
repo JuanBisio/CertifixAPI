@@ -53,8 +53,8 @@ export class DisputasService {
         .from('disputas')
         .insert({
           trabajo_id: createDisputaDto.trabajo_id,
-          razon: createDisputaDto.razon,
-          estado_disputa: 'pendiente',
+          motivo: createDisputaDto.razon,
+          estado: 'abierta',
           created_at: new Date().toISOString(),
         })
         .select()

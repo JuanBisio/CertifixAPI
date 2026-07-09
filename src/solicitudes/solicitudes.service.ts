@@ -10,7 +10,6 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { NotificationsService } from '../notifications/notifications.service';
-import { CreatePostulacionDto } from './dto/create-postulacion.dto';
 
 @Injectable()
 export class SolicitudesService {
@@ -21,217 +20,186 @@ export class SolicitudesService {
     private notificationsService: NotificationsService,
   ) {}
 
-  async create(
-    userId: string,
-    createSolicitudDto: CreateSolicitudDto,
-    accessToken: string,
-  ) {
+  // ─── CREATE ───────────────────────────────────────────────────────────────
+
+  async create(userId: string, dto: CreateSolicitudDto, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    try {
-      // Verify user is a cliente
-      const { data: profile } = await supabase
-        .from('perfiles')
-        .select('rol')
-        .eq('id', userId)
-        .single();
+    const { data: profile } = await supabase
+      .from('perfiles')
+      .select('rol')
+      .eq('id', userId)
+      .single();
 
-      if (profile?.rol !== 'cliente') {
-        throw new ForbiddenException('Only clientes can create work requests');
-      }
-
-      // Verify rubro exists
-      const { data: rubro } = await supabase
-        .from('rubros')
-        .select('id')
-        .eq('id', createSolicitudDto.rubro_id)
-        .single();
-
-      if (!rubro) {
-        throw new BadRequestException('Invalid rubro_id');
-      }
-
-      // Parse coords
-      const { lon, lat } = this.parseCoords(createSolicitudDto.coordenadas_privadas);
-      const { lon: lonDif, lat: latDif } = this.parseCoords(
-        (createSolicitudDto as any).coordenadas_publicas || createSolicitudDto.coordenadas_privadas,
-      );
-
-      // Create solicitud
-      const { data, error } = await supabase
-        .from('solicitudes_trabajo')
-        .insert({
-          cliente_id: userId,
-          rubro_id: createSolicitudDto.rubro_id,
-          descripcion: createSolicitudDto.descripcion,
-          direccion_exacta: createSolicitudDto.direccion_exacta,
-          zona_nombre: createSolicitudDto.zona_nombre,
-          ubicacion_real: `POINT(${lon} ${lat})`,
-          ubicacion_difusa: `POINT(${lonDif} ${latDif})`,
-          estado: 'buscando',
-          fecha_desde: (createSolicitudDto as any).fecha_desde,
-          fecha_hasta: (createSolicitudDto as any).fecha_hasta,
-          created_at: new Date().toISOString(),
-        })
-        .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
-        .single();
-
-      if (error) {
-        this.logger.error(`Failed to create solicitud: ${error.message}`);
-        throw new BadRequestException('Failed to create work request');
-      }
-
-      // Notify prestadores del rubro disponibles y verificados
-      void this.notificationsService.notifyPrestadoresForRubro(
-        createSolicitudDto.rubro_id,
-        accessToken,
-        {
-          title: 'Nuevo trabajo disponible',
-          body: createSolicitudDto.descripcion.substring(0, 120),
-          data: {
-            solicitudId: data.id,
-            rubroId: data.rubro_id,
-            estado: data.estado,
-          },
-        },
-      );
-
-      this.logger.log(`Solicitud created: ${data.id}`);
-      return { solicitud: data };
-    } catch (error) {
-      if (
-        error instanceof BadRequestException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-      this.logger.error(`Create solicitud error: ${error.message}`);
-      throw new BadRequestException('Failed to create work request');
+    if (profile?.rol !== 'cliente') {
+      throw new ForbiddenException('Solo clientes pueden crear solicitudes');
     }
+
+    const { data: rubro } = await supabase
+      .from('rubros')
+      .select('id')
+      .eq('id', dto.rubro_id)
+      .single();
+
+    if (!rubro) {
+      throw new BadRequestException('rubro_id inválido');
+    }
+
+    const { lon, lat } = this.parseCoords(dto.coordenadas_privadas);
+    const { lon: lonDif, lat: latDif } = this.parseCoords(
+      dto.coordenadas_publicas ?? dto.coordenadas_privadas,
+    );
+
+    const timeoutAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    const { data, error } = await supabase
+      .from('solicitudes_trabajo')
+      .insert({
+        cliente_id: userId,
+        rubro_id: dto.rubro_id,
+        descripcion: dto.descripcion,
+        fotos_urls: dto.fotos_urls ?? [],
+        tipo_tecnico: dto.tipo_tecnico,
+        urgencia: dto.urgencia,
+        franja_horaria: dto.franja_horaria ?? null,
+        fecha_preferida: dto.fecha_preferida ?? null,
+        direccion_exacta: dto.direccion_exacta,
+        zona_nombre: dto.zona_nombre,
+        ubicacion_real: `POINT(${lon} ${lat})`,
+        ubicacion_difusa: `POINT(${lonDif} ${latDif})`,
+        estado: 'buscando',
+        timeout_at: timeoutAt,
+        created_at: new Date().toISOString(),
+      })
+      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .single();
+
+    if (error) {
+      this.logger.error(`Error creando solicitud: ${error.message}`);
+      throw new BadRequestException('No se pudo crear la solicitud');
+    }
+
+    void this.notificationsService.notifyPrestadoresParaSolicitud(
+      dto.rubro_id,
+      lon,
+      lat,
+      accessToken,
+      {
+        title: 'Nuevo trabajo disponible',
+        body: dto.descripcion.substring(0, 120),
+        data: { solicitudId: data.id, rubroId: data.rubro_id, estado: data.estado },
+      },
+    );
+
+    this.logger.log(`Solicitud creada: ${data.id}`);
+    return { solicitud: data };
   }
+
+  // ─── FIND ALL (por rol) ────────────────────────────────────────────────────
 
   async findAll(userId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    try {
-      // Get user profile
-      const { data: profile } = await supabase
-        .from('perfiles')
-        .select('rol')
+    const { data: profile } = await supabase
+      .from('perfiles')
+      .select('rol')
+      .eq('id', userId)
+      .single();
+
+    if (!profile) throw new BadRequestException('Perfil no encontrado');
+
+    let query = supabase
+      .from('solicitudes_trabajo')
+      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .order('created_at', { ascending: false });
+
+    if (profile.rol === 'cliente') {
+      query = query.eq('cliente_id', userId);
+    } else if (profile.rol === 'prestador') {
+      const { data: prestador } = await supabase
+        .from('perfiles_prestadores')
+        .select('esta_verificado')
         .eq('id', userId)
         .single();
 
-      if (!profile) {
-        throw new BadRequestException('Profile not found');
-      }
+      if (!prestador?.esta_verificado) return { solicitudes: [] };
 
-      let query = supabase
-        .from('solicitudes_trabajo')
-        .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
-        .order('created_at', { ascending: false });
+      // Obtener los rubros del prestador
+      const { data: rubros } = await supabase
+        .from('prestador_rubros')
+        .select('rubro_id')
+        .eq('prestador_id', userId);
 
-      if (profile.rol === 'cliente') {
-        query = query.eq('cliente_id', userId);
-      } else if (profile.rol === 'prestador') {
-        const { data: prestador } = await supabase
-          .from('perfiles_prestadores')
-          .select('rubro_id, esta_verificado')
-          .eq('id', userId)
-          .single();
+      const rubroIds = (rubros ?? []).map((r: any) => r.rubro_id);
+      if (!rubroIds.length) return { solicitudes: [] };
 
-        if (!prestador) {
-          throw new ForbiddenException('Prestador profile not found');
-        }
-
-        if (!prestador.esta_verificado) {
-          return { solicitudes: [] };
-        }
-
-        query = query
-          .eq('estado', 'buscando')
-          .eq('rubro_id', prestador.rubro_id);
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        this.logger.error(`Failed to fetch solicitudes: ${error.message}`);
-        throw new BadRequestException('Failed to fetch work requests');
-      }
-
-      const canSeeExactForIds = new Set<string>();
-      if (profile.rol === 'cliente') {
-        (data || []).forEach((d: any) => canSeeExactForIds.add(d.id));
-      }
-
-      const sanitized = (data || []).map((d: any) =>
-        this.sanitizeLocation(
-          d,
-          canSeeExactForIds.has(d.id) || d.prestador_id === userId,
-        ),
-      );
-
-      return { solicitudes: sanitized };
-    } catch (error) {
-      if (
-        error instanceof BadRequestException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-      this.logger.error(`Find all solicitudes error: ${error.message}`);
-      throw new BadRequestException('Failed to fetch work requests');
+      query = query
+        .eq('estado', 'buscando')
+        .in('rubro_id', rubroIds);
     }
+
+    const { data, error } = await query;
+    if (error) throw new BadRequestException('Error obteniendo solicitudes');
+
+    const canSeeExact = profile.rol === 'cliente';
+    const sanitized = (data ?? []).map((d: any) =>
+      this.sanitizeLocation(d, canSeeExact || d.prestador_id === userId),
+    );
+
+    return { solicitudes: sanitized };
   }
+
+  // ─── MY ACTIVE (prestador) ────────────────────────────────────────────────
 
   async getMyActive(userId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    try {
-      // Verify user is prestador
-      const { data: profile } = await supabase
-        .from('perfiles')
-        .select('rol')
-        .eq('id', userId)
-        .single();
+    const { data: profile } = await supabase
+      .from('perfiles')
+      .select('rol')
+      .eq('id', userId)
+      .single();
 
-      if (profile?.rol !== 'prestador') {
-        throw new ForbiddenException('Only prestadores can view active work');
-      }
-
-      // Get active solicitud
+    if (profile?.rol === 'prestador') {
       const { data, error } = await supabase
         .from('solicitudes_trabajo')
         .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono)')
         .eq('prestador_id', userId)
-        .in('estado', ['aceptado', 'pagado', 'finalizado'])
+        .in('estado', ['aceptado', 'en_camino', 'finalizado'])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
 
       if (error && error.code !== 'PGRST116') {
-        // PGRST116 is "no rows returned" which is fine
-        this.logger.error(`Failed to fetch active work: ${error.message}`);
-        throw new BadRequestException('Failed to fetch active work');
+        throw new BadRequestException('Error obteniendo trabajo activo');
       }
-
-      return { solicitud: data || null };
-    } catch (error) {
-      if (
-        error instanceof BadRequestException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-      this.logger.error(`Get my active error: ${error.message}`);
-      throw new BadRequestException('Failed to fetch active work');
+      return { solicitud: data ?? null };
     }
+
+    if (profile?.rol === 'cliente') {
+      const { data, error } = await supabase
+        .from('solicitudes_trabajo')
+        .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre, telefono)')
+        .eq('cliente_id', userId)
+        .in('estado', ['buscando', 'aceptado', 'en_camino', 'finalizado'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw new BadRequestException('Error obteniendo solicitud activa');
+      }
+      return { solicitud: data ?? null };
+    }
+
+    throw new ForbiddenException('Rol no válido para este endpoint');
   }
+
+  // ─── HISTORY (prestador) ──────────────────────────────────────────────────
 
   async getHistory(userId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
-    
-    // Verify prestador
+
     const { data: profile } = await supabase
       .from('perfiles')
       .select('rol')
@@ -239,7 +207,7 @@ export class SolicitudesService {
       .single();
 
     if (profile?.rol !== 'prestador') {
-      throw new ForbiddenException('Only prestadores can access history');
+      throw new ForbiddenException('Solo prestadores pueden ver el historial');
     }
 
     const { data, error } = await supabase
@@ -247,476 +215,295 @@ export class SolicitudesService {
       .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
       .eq('prestador_id', userId)
       .in('estado', ['finalizado', 'cerrado'])
-      .order('updated_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
-    if (error) {
-      this.logger.error(`Failed to fetch history: ${error.message}`);
-      throw new BadRequestException('Failed to fetch history');
-    }
+    if (error) throw new BadRequestException('Error obteniendo historial');
 
-    return { solicitudes: data || [] };
+    return { solicitudes: data ?? [] };
   }
+
+  // ─── FIND ONE ─────────────────────────────────────────────────────────────
 
   async findOne(id: string, userId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    try {
-      // Identify requester role and, if prestador, its rubro/verification
-      const { data: profile } = await supabase
-        .from('perfiles')
-        .select('rol')
+    const { data: profile } = await supabase
+      .from('perfiles')
+      .select('rol')
+      .eq('id', userId)
+      .single();
+
+    let prestadorProfile: any = null;
+    if (profile?.rol === 'prestador') {
+      const { data } = await supabase
+        .from('perfiles_prestadores')
+        .select('esta_verificado')
         .eq('id', userId)
         .single();
-
-      let prestadorProfile: any = null;
-      if (profile?.rol === 'prestador') {
-        const { data: prest } = await supabase
-          .from('perfiles_prestadores')
-          .select('rubro_id, esta_verificado')
-          .eq('id', userId)
-          .single();
-        prestadorProfile = prest;
-      }
-
-      const { data, error } = await supabase
-        .from('solicitudes_trabajo')
-        .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono)')
-        .eq('id', id)
-        .single();
-
-      if (error) {
-        this.logger.error(`Failed to fetch solicitud: ${error.message}`);
-        throw new NotFoundException('Work request not found');
-      }
-
-      // Access rules:
-      // - Cliente owner can see
-      // - Prestador assigned can see
-      // - Prestador verificado puede ver trabajos en estado buscando (sin ubicación exacta)
-      const isCliente = data.cliente_id === userId;
-      const isPrestadorAsignado = data.prestador_id === userId;
-      const isPrestadorPendienteVisible =
-        profile?.rol === 'prestador' &&
-        data.estado === 'buscando' &&
-        prestadorProfile?.esta_verificado &&
-        prestadorProfile?.rubro_id === data.rubro_id;
-
-      if (!isCliente && !isPrestadorAsignado && !isPrestadorPendienteVisible) {
-        throw new ForbiddenException('Access denied to this work request');
-      }
-
-      let mi_postulacion = null;
-      if (profile?.rol === 'prestador') {
-        const { data: propia } = await supabase
-          .from('postulaciones')
-          .select('*')
-          .eq('trabajo_id', id)
-          .eq('prestador_id', userId)
-          .single();
-        mi_postulacion = propia || null;
-      }
-
-      const sanitized = this.sanitizeLocation(data, isCliente || isPrestadorAsignado);
-
-      return { solicitud: { ...sanitized, mi_postulacion } };
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-      this.logger.error(`Find one solicitud error: ${error.message}`);
-      throw new NotFoundException('Work request not found');
+      prestadorProfile = data;
     }
+
+    const { data, error } = await supabase
+      .from('solicitudes_trabajo')
+      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono)')
+      .eq('id', id)
+      .single();
+
+    if (error) throw new NotFoundException('Solicitud no encontrada');
+
+    const isCliente = data.cliente_id === userId;
+    const isPrestadorAsignado = data.prestador_id === userId;
+    const isPrestadorVisitante =
+      profile?.rol === 'prestador' &&
+      data.estado === 'buscando' &&
+      prestadorProfile?.esta_verificado;
+
+    if (!isCliente && !isPrestadorAsignado && !isPrestadorVisitante) {
+      throw new ForbiddenException('Sin acceso a esta solicitud');
+    }
+
+    return { solicitud: this.sanitizeLocation(data, isCliente || isPrestadorAsignado) };
   }
 
-  // Postularse a un trabajo (prestador)
-  async createPostulacion(
-    trabajoId: string,
-    prestadorId: string,
-    dto: CreatePostulacionDto,
-    accessToken: string,
-  ) {
+  // ─── ACCEPT (prestador) ───────────────────────────────────────────────────
+
+  async accept(solicitudId: string, prestadorId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    // Validaciones básicas
+    // Verificar perfil de prestador
     const { data: profile } = await supabase
       .from('perfiles')
       .select('rol')
       .eq('id', prestadorId)
       .single();
+
     if (profile?.rol !== 'prestador') {
-      throw new ForbiddenException('Solo prestadores pueden postularse');
+      throw new ForbiddenException('Solo prestadores pueden aceptar trabajos');
     }
 
-    const { data: prestador, error: prestError } = await supabase
+    const { data: prestador } = await supabase
       .from('perfiles_prestadores')
-      .select('rubro_id, esta_verificado, disponible')
+      .select('esta_verificado, disponible')
       .eq('id', prestadorId)
       .single();
-    if (prestError || !prestador) {
-      throw new ForbiddenException('Perfil de prestador no encontrado');
+
+    if (!prestador?.esta_verificado) {
+      throw new ForbiddenException('Debes estar verificado para aceptar trabajos');
     }
-    if (!prestador.esta_verificado) {
-      throw new ForbiddenException('Debes estar verificado para postularte');
-    }
-    if (!prestador.disponible) {
-      throw new ForbiddenException('Activa tu disponibilidad para postularte');
+    if (!prestador?.disponible) {
+      throw new ForbiddenException('Debes estar disponible para aceptar trabajos');
     }
 
-    // Trabajo debe existir y estar buscando
-    const { data: trabajo } = await supabase
+    // Verificar que el rubro coincide
+    const { data: solicitud } = await supabase
       .from('solicitudes_trabajo')
-      .select('id, cliente_id, estado, rubro_id, zona_nombre')
-      .eq('id', trabajoId)
-      .single();
-    if (!trabajo) {
-      throw new NotFoundException('Trabajo no encontrado');
-    }
-    if (trabajo.estado !== 'buscando') {
-      throw new BadRequestException('Este trabajo ya no acepta postulaciones');
-    }
-    if (trabajo.rubro_id !== prestador.rubro_id) {
-      throw new ForbiddenException('El trabajo no coincide con tu rubro');
-    }
-
-    // Insert postulacion
-    const { data: postulacion, error } = await supabase
-      .from('postulaciones')
-      .insert({
-        trabajo_id: trabajoId,
-        prestador_id: prestadorId,
-        monto_ofertado: dto.monto_ofertado,
-        comentario: dto.comentario || null,
-        estado: 'pendiente',
-        created_at: new Date().toISOString(),
-      })
-      .select('*')
+      .select('id, cliente_id, rubro_id, estado, tipo_tecnico')
+      .eq('id', solicitudId)
       .single();
 
-    if (error) {
-      this.logger.error(`No se pudo crear la postulación: ${error.message}`);
-      throw new BadRequestException('No se pudo crear la postulación');
+    if (!solicitud) throw new NotFoundException('Solicitud no encontrada');
+    if (solicitud.estado !== 'buscando') {
+      throw new ConflictException('Este trabajo ya fue tomado por otro técnico');
     }
 
-    // Notificar al cliente
-    void this.notificationsService.notifyUsers(
-      [trabajo.cliente_id],
-      'Nueva postulación',
-      'Un prestador envió una propuesta',
-      accessToken,
-      { solicitudId: trabajoId, estado: trabajo.estado },
-    );
-
-    return { postulacion };
-  }
-
-  async listPostulaciones(trabajoId: string, userId: string, accessToken: string) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
-
-    const { data: trabajo } = await supabase
-      .from('solicitudes_trabajo')
-      .select('cliente_id')
-      .eq('id', trabajoId)
-      .single();
-    if (!trabajo) {
-      throw new NotFoundException('Trabajo no encontrado');
-    }
-    if (trabajo.cliente_id !== userId) {
-      throw new ForbiddenException('Solo el cliente puede ver postulaciones');
-    }
-
-    const { data, error } = await supabase
-      .from('postulaciones')
-      .select('*, perfiles:perfiles!postulaciones_prestador_id_fkey(id, nombre)')
-      .eq('trabajo_id', trabajoId)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      this.logger.error(`No se pudieron obtener postulaciones: ${error.message}`);
-      throw new BadRequestException('No se pudieron obtener las postulaciones');
-    }
-
-    return { postulaciones: data || [] };
-  }
-
-  async seleccionarPostulante(
-    trabajoId: string,
-    postulacionId: string,
-    userId: string,
-    accessToken: string,
-  ) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
-
-    const { data: trabajo, error: trabajoError } = await supabase
-      .from('solicitudes_trabajo')
-      .select('cliente_id, estado')
-      .eq('id', trabajoId)
+    const { data: rubroMatch } = await supabase
+      .from('prestador_rubros')
+      .select('id')
+      .eq('prestador_id', prestadorId)
+      .eq('rubro_id', solicitud.rubro_id)
       .single();
 
-    if (trabajoError || !trabajo) {
-      throw new NotFoundException('Trabajo no encontrado');
-    }
-    if (trabajo.cliente_id !== userId) {
-      throw new ForbiddenException('Solo el cliente puede seleccionar postulante');
-    }
-    if (trabajo.estado !== 'buscando') {
-      throw new BadRequestException('El trabajo ya no está en etapa de selección');
+    if (!rubroMatch) {
+      throw new ForbiddenException('El trabajo no coincide con tus rubros');
     }
 
-    // Obtener postulacion
-    const { data: postulacion } = await supabase
-      .from('postulaciones')
-      .select('prestador_id, estado, monto_ofertado')
-      .eq('id', postulacionId)
-      .eq('trabajo_id', trabajoId)
-      .single();
-
-    if (!postulacion) {
-      throw new NotFoundException('Postulación no encontrada');
-    }
-
-    // Marcar postulacion ganadora y rechazar el resto
-    const { error: updatePostError } = await supabase
-      .from('postulaciones')
-      .update({ estado: 'aceptada' })
-      .eq('id', postulacionId)
-      .eq('trabajo_id', trabajoId);
-
-    if (updatePostError) {
-      this.logger.error(`No se pudo aceptar la postulación: ${updatePostError.message}`);
-      throw new BadRequestException('No se pudo aceptar la postulación');
-    }
-
-    await supabase
-      .from('postulaciones')
-      .update({ estado: 'rechazada' })
-      .eq('trabajo_id', trabajoId)
-      .neq('id', postulacionId);
-
-    // Actualizar trabajo
-    const { data: updated, error: workUpdateError } = await supabase
+    // Aceptación atómica — solo el primero gana
+    const { data: updated, error } = await supabase
       .from('solicitudes_trabajo')
       .update({
-        prestador_id: postulacion.prestador_id,
+        prestador_id: prestadorId,
         estado: 'aceptado',
-        monto: postulacion.monto_ofertado, // Update price with accepted offer
+        timeout_at: null,
+        timeout_notificado_at: null,
       })
-      .eq('id', trabajoId)
+      .eq('id', solicitudId)
+      .eq('estado', 'buscando')
+      .is('prestador_id', null)
       .select('*, rubros(id, nombre, icono)')
       .single();
 
-    if (workUpdateError) {
-      this.logger.error(`No se pudo actualizar el trabajo: ${workUpdateError.message}`);
-      throw new BadRequestException('No se pudo actualizar el trabajo');
+    if (error || !updated) {
+      throw new ConflictException('Este trabajo ya fue tomado por otro técnico');
     }
 
-    // Notificar prestador ganador
     void this.notificationsService.notifyUsers(
-      [postulacion.prestador_id],
-      'Fuiste seleccionado',
-      'El cliente te eligió para este trabajo',
+      [solicitud.cliente_id],
+      'Técnico en camino',
+      'Un técnico aceptó tu solicitud y se está preparando.',
       accessToken,
-      { solicitudId: trabajoId, estado: 'aceptado' },
+      { solicitudId, estado: 'aceptado' },
     );
 
+    this.logger.log(`Solicitud ${solicitudId} aceptada por prestador ${prestadorId}`);
     return { solicitud: updated };
   }
+
+  // ─── UPDATE STATUS ────────────────────────────────────────────────────────
 
   async updateStatus(
     id: string,
     userId: string,
-    updateStatusDto: UpdateStatusDto,
+    dto: UpdateStatusDto,
     accessToken: string,
   ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    try {
-      // Get the solicitud
-      const { data: solicitud, error: fetchError } = await supabase
-        .from('solicitudes_trabajo')
-        .select('*, rubros(id, nombre, icono)')
-        .eq('id', id)
-        .single();
+    const { data: solicitud, error: fetchError } = await supabase
+      .from('solicitudes_trabajo')
+      .select('*, rubros(id, nombre, icono)')
+      .eq('id', id)
+      .single();
 
-      if (fetchError || !solicitud) {
-        throw new NotFoundException('Work request not found');
-      }
+    if (fetchError || !solicitud) throw new NotFoundException('Solicitud no encontrada');
 
-      // Verify user has permission
-      const isCliente = solicitud.cliente_id === userId;
-      const isPrestador = solicitud.prestador_id === userId;
+    const isCliente = solicitud.cliente_id === userId;
+    const isPrestador = solicitud.prestador_id === userId;
 
-      if (!isCliente && !isPrestador) {
-        throw new ForbiddenException('Access denied to this work request');
-      }
-
-      // Enforce who can trigger each state
-      if (updateStatusDto.estado === 'aceptado') {
-        throw new BadRequestException('Use /solicitudes/:id/accept to accept a job');
-      }
-      if (updateStatusDto.estado === 'finalizado' && !isPrestador) {
-        throw new ForbiddenException('Only prestadores can finalize the work');
-      }
-      if (updateStatusDto.estado === 'cerrado' && !isCliente) {
-        throw new ForbiddenException('Only clientes can close the work');
-      }
-
-      // Validate state transitions
-      const validTransitions: Record<string, string[]> = {
-        buscando: ['aceptado'],
-        aceptado: ['pagado', 'finalizado'], // Can go to paid or finalized (if manual pay)
-        pagado: ['finalizado'],
-        finalizado: ['cerrado'],
-      };
-
-      const currentState = solicitud.estado;
-      const newState = updateStatusDto.estado;
-
-      if (
-        !validTransitions[currentState] ||
-        !validTransitions[currentState].includes(newState)
-      ) {
-        throw new BadRequestException(
-          `Invalid state transition from ${currentState} to ${newState}`,
-        );
-      }
-
-      // If transitioning to finalizado, ensure evidence exists
-      if (newState === 'finalizado') {
-        const { count, error: evError } = await supabase
-          .from('evidencias')
-          .select('id', { count: 'exact', head: true })
-          .eq('trabajo_id', id);
-
-        if (evError) {
-          this.logger.warn(
-            `Could not verify evidencias for ${id}: ${evError.message}. Proceeding without block.`,
-          );
-        } else if (typeof count === 'number' && count === 0) {
-          throw new BadRequestException(
-            'Cannot finalize work without uploading evidence first',
-          );
-        }
-      }
-
-      // Update status
-      const { data, error } = await supabase
-        .from('solicitudes_trabajo')
-        .update({
-          estado: newState,
-        })
-        .eq('id', id)
-        .eq('estado', currentState)
-        .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          throw new ConflictException('State was updated by another process. Refresh and try again.');
-        }
-        this.logger.error(`Failed to update status: ${error.message}`);
-        throw new BadRequestException('Failed to update status');
-      }
-
-      if (newState === 'finalizado') {
-        const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
-        const { error: expiresError } = await supabase
-          .from('evidencias')
-          .update({ expires_at: expiresAt })
-          .eq('trabajo_id', id)
-          .eq('es_reclamo', false);
-
-        if (expiresError) {
-          this.logger.warn(`Could not set expires_at for evidencias of ${id}: ${expiresError.message}`);
-        }
-      }
-
-      // Payout Logic: When status changes to 'cerrado'
-      if (newState === 'cerrado') {
-        const { data: payment } = await supabase
-          .from('payments')
-          .select('provider_amount, status')
-          .eq('solicitud_id', id)
-          .eq('status', 'completed')
-          .single();
-
-        if (payment && payment.provider_amount > 0) {
-          // Add to prestador balance
-          const svcClient = this.supabaseService.getServiceClient();
-          
-          await svcClient.rpc('increment_saldo', { 
-            user_id: solicitud.prestador_id, 
-            amount: payment.provider_amount 
-          });
-
-          // Update payment status to released
-          await svcClient
-            .from('payments')
-            .update({ status: 'released' })
-            .eq('solicitud_id', id);
-
-          this.logger.log(`Payout release for solicitud ${id}: ${payment.provider_amount} added to prestador ${solicitud.prestador_id}`);
-        }
-      }
-
-      const targets = [solicitud.cliente_id, solicitud.prestador_id].filter(
-        (uid) => uid && uid !== userId,
-      );
-      if (targets.length) {
-        const statusCopy: Record<string, { title: string; body: string }> = {
-          aceptado: {
-            title: 'Solicitud aceptada',
-            body: 'Un prestador tomó tu trabajo.',
-          },
-          pagado: {
-            title: 'Pago registrado',
-            body: 'El pago fue confirmado para tu solicitud.',
-          },
-          finalizado: {
-            title: 'Trabajo finalizado',
-            body: 'Revisa la evidencia y cierra la solicitud.',
-          },
-          cerrado: {
-            title: 'Solicitud cerrada',
-            body: 'El ciclo del trabajo fue cerrado.',
-          },
-        };
-
-        const message = statusCopy[newState] || {
-          title: 'Solicitud actualizada',
-          body: `Estado: ${newState}`,
-        };
-
-        void this.notificationsService.notifyUsers(
-          targets as string[],
-          message.title,
-          message.body,
-          accessToken,
-          { solicitudId: id, estado: newState },
-        );
-      }
-
-      this.logger.log(`Solicitud ${id} status updated: ${currentState} -> ${newState}`);
-      return { solicitud: data };
-    } catch (error) {
-      if (
-        error instanceof BadRequestException ||
-        error instanceof ForbiddenException ||
-        error instanceof NotFoundException
-      ) {
-        throw error;
-      }
-      this.logger.error(`Update status error: ${error.message}`);
-      throw new BadRequestException('Failed to update status');
+    if (!isCliente && !isPrestador) {
+      throw new ForbiddenException('Sin acceso a esta solicitud');
     }
+
+    // Reglas por rol
+    if ((dto.estado === 'en_camino' || dto.estado === 'finalizado') && !isPrestador) {
+      throw new ForbiddenException('Solo el prestador asignado puede actualizar a este estado');
+    }
+    if (dto.estado === 'cerrado' && !isCliente) {
+      throw new ForbiddenException('Solo el cliente puede cerrar la solicitud');
+    }
+
+    // Transiciones válidas: aceptado→en_camino | aceptado/en_camino→finalizado | finalizado→cerrado
+    const validTransitions: Record<string, string[]> = {
+      aceptado: ['en_camino', 'finalizado'],
+      en_camino: ['finalizado'],
+      finalizado: ['cerrado'],
+    };
+
+    const current = solicitud.estado;
+    if (!validTransitions[current]?.includes(dto.estado)) {
+      throw new BadRequestException(
+        `Transición inválida: ${current} → ${dto.estado}`,
+      );
+    }
+
+    const { data, error } = await supabase
+      .from('solicitudes_trabajo')
+      .update({ estado: dto.estado })
+      .eq('id', id)
+      .eq('estado', current)
+      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        throw new ConflictException('Estado modificado por otro proceso. Reintentá.');
+      }
+      throw new BadRequestException('Error actualizando estado');
+    }
+
+    // Evidencias: poner fecha de expiración a los 3 días si finalizado
+    if (dto.estado === 'finalizado') {
+      const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      await supabase
+        .from('evidencias')
+        .update({ expires_at: expiresAt })
+        .eq('trabajo_id', id)
+        .eq('es_reclamo', false);
+    }
+
+    // Notificar a la contraparte
+    const notifyTarget = isPrestador ? solicitud.cliente_id : solicitud.prestador_id;
+    if (notifyTarget) {
+      const messages: Record<string, { title: string; body: string }> = {
+        en_camino: {
+          title: 'El técnico está en camino',
+          body: 'Tu técnico confirmó que ya va hacia tu domicilio.',
+        },
+        finalizado: {
+          title: 'Trabajo finalizado',
+          body: 'El técnico marcó el trabajo como finalizado. Revisá la evidencia y cerrá la solicitud.',
+        },
+        cerrado: {
+          title: 'Solicitud cerrada',
+          body: 'El cliente cerró la solicitud. ¡Gracias por usar CertiFix!',
+        },
+      };
+      const msg = messages[dto.estado];
+      if (msg) {
+        void this.notificationsService.notifyUsers(
+          [notifyTarget],
+          msg.title,
+          msg.body,
+          accessToken,
+          { solicitudId: id, estado: dto.estado },
+        );
+      }
+    }
+
+    this.logger.log(`Solicitud ${id}: ${current} → ${dto.estado}`);
+    return { solicitud: data };
   }
 
-  private sanitizeLocation(solicitud: any, canSeeExact: boolean) {
-    if (canSeeExact) {
-      return solicitud;
+  // ─── CANCEL (cliente, solo en estado buscando) ───────────────────────────
+
+  async cancel(solicitudId: string, userId: string, accessToken: string) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+
+    const { data: profile } = await supabase
+      .from('perfiles')
+      .select('rol')
+      .eq('id', userId)
+      .single();
+
+    if (profile?.rol !== 'cliente') {
+      throw new ForbiddenException('Solo clientes pueden cancelar solicitudes');
     }
+
+    const { data: updated, error } = await supabase
+      .from('solicitudes_trabajo')
+      .update({ estado: 'cancelado' })
+      .eq('id', solicitudId)
+      .eq('cliente_id', userId)
+      .eq('estado', 'buscando')
+      .select('id, estado')
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      const { data: existing } = await supabase
+        .from('solicitudes_trabajo')
+        .select('estado, cliente_id')
+        .eq('id', solicitudId)
+        .single();
+
+      if (!existing) throw new NotFoundException('Solicitud no encontrada');
+      if (existing.cliente_id !== userId) throw new ForbiddenException('No tenés permiso sobre esta solicitud');
+      throw new BadRequestException(
+        `Solo se puede cancelar en estado buscando. Estado actual: ${existing.estado}`,
+      );
+    }
+
+    if (error) {
+      this.logger.error(`Error cancelando solicitud ${solicitudId}: ${error.message} (code: ${error.code})`);
+      throw new BadRequestException(`Error cancelando la solicitud: ${error.message}`);
+    }
+
+    this.logger.log(`Solicitud ${solicitudId} cancelada por cliente ${userId}`);
+    return { solicitud: updated };
+  }
+
+  // ─── HELPERS ──────────────────────────────────────────────────────────────
+
+  private sanitizeLocation(solicitud: any, canSeeExact: boolean) {
+    if (canSeeExact) return solicitud;
 
     const approx = solicitud.ubicacion_difusa
       ? this.parsePoint(solicitud.ubicacion_difusa)
@@ -730,46 +517,30 @@ export class SolicitudesService {
       direccion_exacta: null,
       coordenadas_privadas: null,
       ubicacion_real: null,
-      monto: null,
-      ubicacion: solicitud.zona_nombre || approxLabel || 'Ubicación a convenir',
+      ubicacion: solicitud.zona_nombre ?? approxLabel ?? 'Ubicación a convenir',
     };
   }
 
   private parseCoords(value: string): { lon: number; lat: number } {
-    if (!value) {
-      throw new BadRequestException('Coordenadas requeridas');
-    }
+    if (!value) throw new BadRequestException('Coordenadas requeridas');
     const parts = value.split(',').map((p) => Number(p.trim()));
-    if (parts.length !== 2 || parts.some((p) => Number.isNaN(p))) {
-      throw new BadRequestException('Formato de coordenadas inválido. Usa "lon,lat"');
+    if (parts.length !== 2 || parts.some(Number.isNaN)) {
+      throw new BadRequestException('Formato de coordenadas inválido. Usar "lon,lat"');
     }
-    const [lon, lat] = parts;
-    return { lon, lat };
+    return { lon: parts[0], lat: parts[1] };
   }
 
   private parsePoint(value: any): { lon: number; lat: number } | null {
     if (!value) return null;
-
-    // Geometry object from Postgres/PostgREST: { type: 'Point', coordinates: [lon, lat] }
     if (typeof value === 'object' && Array.isArray(value.coordinates)) {
       const [lon, lat] = value.coordinates;
-      if (!Number.isNaN(lon) && !Number.isNaN(lat)) {
-        return { lon: Number(lon), lat: Number(lat) };
-      }
+      if (!Number.isNaN(lon) && !Number.isNaN(lat)) return { lon: Number(lon), lat: Number(lat) };
     }
-
-    const asString = String(value);
-    // Accept "POINT(lon lat)" or "(-58.38,-34.60)"
-    const pointRegex = /POINT\\((-?\\d+(?:\\.\\d+)?)\\s+(-?\\d+(?:\\.\\d+)?)\\)/i;
-    const match = asString.match(pointRegex);
-    if (match) {
-      return { lon: Number(match[1]), lat: Number(match[2]) };
-    }
-    const coordsRegex = /(-?\\d+(?:\\.\\d+)?),\\s*(-?\\d+(?:\\.\\d+)?)/;
-    const m2 = asString.match(coordsRegex);
-    if (m2) {
-      return { lon: Number(m2[1]), lat: Number(m2[2]) };
-    }
+    const str = String(value);
+    const m = str.match(/POINT\((-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/i);
+    if (m) return { lon: Number(m[1]), lat: Number(m[2]) };
+    const m2 = str.match(/(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);
+    if (m2) return { lon: Number(m2[1]), lat: Number(m2[2]) };
     return null;
   }
 }

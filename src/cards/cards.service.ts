@@ -238,6 +238,61 @@ export class CardsService {
   }
 
   /**
+   * Charges a saved card for a fixed amount, not tied to a solicitud.
+   * Used by SubscriptionsService to bill the prestador's monthly subscription.
+   */
+  async chargeSavedCard(
+    paymentMethodId: string,
+    userId: string,
+    amount: number,
+    description: string,
+  ): Promise<{ success: boolean; provider_transaction_id?: string; status: 'completed' | 'failed'; error?: string }> {
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data: savedCard, error: cardError } = await supabase
+      .from('users_payment_methods')
+      .select('*')
+      .eq('id', paymentMethodId)
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .single();
+
+    if (cardError || !savedCard) {
+      throw new NotFoundException('Payment method not found');
+    }
+
+    const token = await this.generateCardToken(savedCard.mp_card_id);
+
+    try {
+      const mpPayment = await this.paymentClient.create({
+        body: {
+          transaction_amount: amount,
+          token,
+          description,
+          installments: 1,
+          payment_method_id: savedCard.card_brand,
+          payer: {
+            type: 'customer',
+            id: savedCard.mp_customer_id,
+          },
+        },
+      });
+
+      const status = mpPayment.status === 'approved' ? 'completed' : 'failed';
+
+      return {
+        success: status === 'completed',
+        provider_transaction_id: String(mpPayment.id),
+        status,
+        error: status === 'failed' ? 'Pago rechazado' : undefined,
+      };
+    } catch (err: any) {
+      this.logger.error(`chargeSavedCard failed: ${err.message}`);
+      return { success: false, status: 'failed', error: err.message };
+    }
+  }
+
+  /**
    * Processes a payment using a saved card.
    */
   async payWithSavedCard(

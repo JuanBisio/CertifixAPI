@@ -1,14 +1,26 @@
 import { Controller, Get, Patch, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsOptional, IsIn } from 'class-validator';
 import type { Request } from 'express';
 
 class UpdateFlagDto {
   @IsBoolean()
+  @ApiProperty()
   value: boolean;
+}
+
+class VerifyPrestadorDto {
+  @IsBoolean()
+  @ApiProperty()
+  value: boolean;
+
+  @IsOptional()
+  @IsIn(['estandar', 'premium'])
+  @ApiPropertyOptional({ enum: ['estandar', 'premium'] })
+  tipo_verificacion?: 'estandar' | 'premium';
 }
 
 class ListPrestadoresQuery {
@@ -34,11 +46,11 @@ export class AdminController {
   @Patch('prestadores/:id/verify')
   async verifyPrestador(
     @Param('id') id: string,
-    @Body() dto: UpdateFlagDto,
+    @Body() dto: VerifyPrestadorDto,
     @Req() req: Request,
   ) {
     const accessToken = (req as any).accessToken as string;
-    return this.adminService.setVerificado(accessToken, id, dto.value);
+    return this.adminService.setVerificado(accessToken, id, dto.value, dto.tipo_verificacion);
   }
 
   @Patch('prestadores/:id/disponible')
@@ -49,6 +61,12 @@ export class AdminController {
   ) {
     const accessToken = (req as any).accessToken as string;
     return this.adminService.setDisponible(accessToken, id, dto.value);
+  }
+
+  @Get('suscripciones')
+  async listSuscripciones(@Req() req: Request) {
+    const accessToken = (req as any).accessToken as string;
+    return this.adminService.listSuscripciones(accessToken);
   }
 
   @Get('payments')

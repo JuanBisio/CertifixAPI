@@ -24,11 +24,22 @@ export class AdminService {
     return data || [];
   }
 
-  async setVerificado(accessToken: string, prestadorId: string, value: boolean) {
+  async setVerificado(
+    accessToken: string,
+    prestadorId: string,
+    value: boolean,
+    tipoVerificacion?: 'estandar' | 'premium',
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+
+    const updateData: Record<string, any> = { esta_verificado: value };
+    if (value && tipoVerificacion) {
+      updateData.tipo_verificacion = tipoVerificacion;
+    }
+
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .update({ esta_verificado: value })
+      .update(updateData)
       .eq('id', prestadorId)
       .select('*')
       .single();
@@ -56,6 +67,21 @@ export class AdminService {
     }
 
     return data;
+  }
+
+  async listSuscripciones(accessToken: string) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    const { data, error } = await supabase
+      .from('perfiles_prestadores')
+      .select('id, suscripcion_activa, suscripcion_vence_at, esta_verificado, disponible, perfiles(nombre_completo)')
+      .order('suscripcion_vence_at', { ascending: true });
+
+    if (error) {
+      this.logger.error(`Failed to list suscripciones: ${error.message}`);
+      throw new BadRequestException('Failed to list suscripciones');
+    }
+
+    return data || [];
   }
 
   async listPayments(accessToken: string) {

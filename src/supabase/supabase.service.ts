@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 
 @Injectable()
 export class SupabaseService {
@@ -19,13 +20,18 @@ export class SupabaseService {
 
     this.logger.log(`Service role key loaded: ${serviceRoleKey ? 'yes' : 'no'}`);
 
-    this.supabase = createClient(supabaseUrl, supabaseKey);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const realtimeOpts = { transport: WebSocket as any };
+    this.supabase = createClient(supabaseUrl, supabaseKey, {
+      realtime: realtimeOpts,
+    });
     if (serviceRoleKey) {
       this.serviceClient = createClient(supabaseUrl, serviceRoleKey, {
         auth: {
           autoRefreshToken: false,
           persistSession: false,
         },
+        realtime: realtimeOpts,
       });
       this.logger.log('Supabase service-role client initialized');
     } else {
@@ -48,13 +54,14 @@ export class SupabaseService {
   getAuthenticatedClient(accessToken: string): SupabaseClient {
     const supabaseUrl = this.configService.get<string>('SUPABASE_URL')!;
     const supabaseKey = this.configService.get<string>('SUPABASE_ANON_KEY')!;
-    
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return createClient(supabaseUrl, supabaseKey, {
       global: {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       },
+      realtime: { transport: WebSocket as any },
     });
   }
 

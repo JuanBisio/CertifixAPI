@@ -85,20 +85,25 @@ export class EvidenciasService {
         throw new BadRequestException('File upload failed: ' + uploadError.message);
       }
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
+      // Generar signed URL (válida 1 hora) — funciona tanto con bucket público como privado
+      const service = this.supabaseService.getServiceClient();
+      const { data: signedData, error: signedError } = await service.storage
         .from(this.BUCKET)
-        .getPublicUrl(storagePath);
+        .createSignedUrl(storagePath, 60 * 60);
 
-      const publicUrl = urlData.publicUrl;
+      if (signedError) {
+        this.logger.warn(`No se pudo generar signed URL: ${signedError.message}`);
+      }
 
-      // Create evidencia record
+      const fileUrl = signedData?.signedUrl ?? storagePath;
+
+      // Guardar el storage path (no la URL) para poder regenerar signed URLs
       const { data, error } = await supabase
         .from('evidencias')
         .insert({
           trabajo_id: createEvidenciaDto.trabajo_id,
-          url: publicUrl, // compatibilidad con columnas existentes
-          url_archivo: publicUrl,
+          url: storagePath,
+          url_archivo: storagePath,
           subido_por: userId,
           es_reclamo: createEvidenciaDto.es_reclamo,
           comentario: createEvidenciaDto.comentario || null,
@@ -114,7 +119,8 @@ export class EvidenciasService {
       }
 
       this.logger.log(`Evidence uploaded for trabajo: ${createEvidenciaDto.trabajo_id}`);
-      return { evidencia: data };
+      // Devolver la signed URL en la respuesta inmediata
+      return { evidencia: { ...data, url: fileUrl, url_archivo: fileUrl } };
     } catch (error) {
       if (
         error instanceof BadRequestException ||
@@ -167,7 +173,26 @@ export class EvidenciasService {
         (ev: any) => !ev.expires_at || ev.expires_at > nowIso,
       );
 
-      return { evidencias: filtered };
+      // Generar signed URLs frescas (1 hora) para cada evidencia
+      const service = this.supabaseService.getServiceClient();
+      const evidenciasConUrl = await Promise.all(
+        filtered.map(async (ev: any) => {
+          const path = ev.url_archivo || ev.url;
+          if (!path) return ev;
+          // Si el campo contiene una URL completa (datos previos al cambio), extraer el path
+          const storagePath = path.startsWith('http')
+            ? path.split(`/object/public/${this.BUCKET}/`)[1] ?? path.split(`/object/sign/${this.BUCKET}/`)[1]
+            : path;
+          if (!storagePath) return ev;
+          const { data: s } = await service.storage
+            .from(this.BUCKET)
+            .createSignedUrl(storagePath, 60 * 60);
+          const signedUrl = s?.signedUrl ?? path;
+          return { ...ev, url: signedUrl, url_archivo: signedUrl };
+        }),
+      );
+
+      return { evidencias: evidenciasConUrl };
     } catch (error) {
       if (
         error instanceof BadRequestException ||

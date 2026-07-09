@@ -28,6 +28,7 @@ async function bootstrap() {
   );
 
   // Swagger configuration
+  const isProduction = process.env.NODE_ENV === 'production';
   const swaggerPath = 'api-docs';
   const config = new DocumentBuilder()
     .setTitle('CertiFix API')
@@ -56,49 +57,50 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, config);
 
-  // Add cache prevention middleware for Swagger
-  app.use(
-    `/${swaggerPath}`,
-    (req: Request, res: Response, next: NextFunction) => {
-      res.setHeader(
-        'Cache-Control',
-        'no-store, no-cache, must-revalidate, proxy-revalidate',
-      );
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.setHeader('Surrogate-Control', 'no-store');
-      next();
-    },
-  );
+  if (!isProduction) {
+    // Cache prevention middleware para Swagger
+    app.use(
+      `/${swaggerPath}`,
+      (req: Request, res: Response, next: NextFunction) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.setHeader('Surrogate-Control', 'no-store');
+        next();
+      },
+    );
+  }
 
-  SwaggerModule.setup(swaggerPath, app, document, {
-    customSiteTitle: 'CertiFix API',
-    customfavIcon: 'https://cdn-icons-png.flaticon.com/512/3281/3281307.png',
-    customCss: `
-      .swagger-ui .topbar { display: none; }
-      .swagger-ui .info .title { font-size: 2.5rem; color: #1a202c; }
-      .swagger-ui .info .description { font-size: 1rem; color: #4a5568; line-height: 1.6; }
-      .swagger-ui { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; }
-      .swagger-ui .scheme-container { background: #f7fafc; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; }
-      .swagger-ui .opblock { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 1rem; }
-      .swagger-ui .opblock .opblock-summary { padding: 1rem; }
-      .swagger-ui .opblock.opblock-post { border-color: #48bb78; }
-      .swagger-ui .opblock.opblock-get { border-color: #4299e1; }
-      .swagger-ui .opblock.opblock-put { border-color: #ed8936; }
-      .swagger-ui .opblock.opblock-delete { border-color: #f56565; }
-      .swagger-ui .btn.authorize { background-color: #4299e1; border-color: #4299e1; }
-      .swagger-ui .btn.authorize:hover { background-color: #3182ce; }
-    `,
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'none',
-      filter: true,
-      displayRequestDuration: true,
-    },
-  });
+  if (!isProduction) {
+    SwaggerModule.setup(swaggerPath, app, document, {
+      customSiteTitle: 'CertiFix API',
+      customfavIcon: 'https://cdn-icons-png.flaticon.com/512/3281/3281307.png',
+      customCss: `
+        .swagger-ui .topbar { display: none; }
+        .swagger-ui .info .title { font-size: 2.5rem; color: #1a202c; }
+        .swagger-ui .info .description { font-size: 1rem; color: #4a5568; line-height: 1.6; }
+        .swagger-ui { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; }
+        .swagger-ui .scheme-container { background: #f7fafc; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; }
+        .swagger-ui .opblock { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 1rem; }
+        .swagger-ui .opblock .opblock-summary { padding: 1rem; }
+        .swagger-ui .opblock.opblock-post { border-color: #48bb78; }
+        .swagger-ui .opblock.opblock-get { border-color: #4299e1; }
+        .swagger-ui .opblock.opblock-put { border-color: #ed8936; }
+        .swagger-ui .opblock.opblock-delete { border-color: #f56565; }
+        .swagger-ui .btn.authorize { background-color: #4299e1; border-color: #4299e1; }
+        .swagger-ui .btn.authorize:hover { background-color: #3182ce; }
+      `,
+      swaggerOptions: {
+        persistAuthorization: true,
+        docExpansion: 'none',
+        filter: true,
+        displayRequestDuration: true,
+      },
+    });
+  }
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
 
   logger.log(`\n✅ CertiFix Backend Service Started`);
   logger.log(`🚀 Server running on: http://localhost:${port}`);

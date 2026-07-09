@@ -9,47 +9,25 @@ export class NotificationsService {
 
   constructor(private supabaseService: SupabaseService) {}
 
-  async registerToken(
-    userId: string,
-    registerTokenDto: RegisterTokenDto,
-    accessToken: string,
-  ) {
+  async registerToken(userId: string, dto: RegisterTokenDto, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    const now = new Date().toISOString();
 
-    try {
-      const now = new Date().toISOString();
+    const { error } = await supabase
+      .from('expo_push_tokens')
+      .upsert(
+        { user_id: userId, expo_push_token: dto.expo_push_token, updated_at: now, created_at: now },
+        { onConflict: 'user_id', ignoreDuplicates: false },
+      )
+      .select('id')
+      .single();
 
-      const { error } = await supabase
-        .from('expo_push_tokens')
-        .upsert(
-          {
-            user_id: userId,
-            expo_push_token: registerTokenDto.expo_push_token,
-            updated_at: now,
-            created_at: now,
-          },
-          {
-            onConflict: 'user_id',
-            ignoreDuplicates: false,
-          },
-        )
-        .select('id')
-        .single();
-
-      if (error) {
-        this.logger.error(`Failed to save push token: ${error.message}`);
-        throw new BadRequestException('Failed to register push token');
-      }
-
-      this.logger.log(`Push token stored for user ${userId}`);
-      return {
-        message: 'Push token registered successfully',
-        token: registerTokenDto.expo_push_token,
-      };
-    } catch (error) {
-      this.logger.error(`Register token error: ${error.message}`);
-      throw new BadRequestException('Failed to register push token');
+    if (error) {
+      this.logger.error(`Error guardando push token: ${error.message}`);
+      throw new BadRequestException('No se pudo registrar el push token');
     }
+
+    return { message: 'Push token registrado', token: dto.expo_push_token };
   }
 
   async notifyUsers(
@@ -62,115 +40,111 @@ export class NotificationsService {
     if (!userIds.length) return;
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    try {
-      const { data: tokens, error } = await supabase
-        .from('expo_push_tokens')
-        .select('expo_push_token')
-        .in('user_id', userIds);
+    const { data: tokens, error } = await supabase
+      .from('expo_push_tokens')
+      .select('expo_push_token')
+      .in('user_id', userIds);
 
-      if (error) {
-        if (error.message?.includes('expo_push_tokens')) {
-          this.logger.warn('Push tokens table missing; skip push.');
-          return;
-        }
-        this.logger.error(`Failed to fetch push tokens: ${error.message}`);
-        return;
-      }
-
-      const validTokens =
-        tokens
-          ?.map((t) => t.expo_push_token)
-          .filter((token) => this.isExpoToken(token)) || [];
-
-      await this.sendPushNotifications(
-        validTokens.map((token) => ({
-          to: token,
-          title,
-          body,
-          data: data || {},
-        })),
-      );
-    } catch (error) {
-      this.logger.error(`notifyUsers error: ${error.message}`);
+    if (error) {
+      this.logger.error(`Error obteniendo push tokens: ${error.message}`);
+      return;
     }
+
+    const valid = (tokens ?? [])
+      .map((t: any) => t.expo_push_token)
+      .filter(this.isExpoToken);
+
+    await this.sendPush(valid.map((to: string) => ({ to, title, body, data: data ?? {} })));
   }
 
-  async notifyPrestadoresForRubro(
+  // Notifica a prestadores que coinciden por rubro Y radio PostGIS (función RPC en Supabase)
+  async notifyPrestadoresParaSolicitud(
+    rubroId: string,
+    lon: number,
+    lat: number,
+    accessToken: string,
+    payload: { title: string; body: string; data?: Record<string, any> },
+  ) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+
+    // Llama a la función RPC que hace el match PostGIS + prestador_rubros
+    const { data: prestadores, error } = await supabase.rpc(
+      'get_prestadores_para_solicitud',
+      { p_rubro_id: rubroId, p_lon: lon, p_lat: lat },
+    );
+
+    if (error) {
+      this.logger.error(`Error en RPC get_prestadores_para_solicitud: ${error.message}`);
+      // Fallback: notificar por rubro sin filtro geográfico si la función no existe aún
+      await this.notifyPrestadoresFallback(rubroId, accessToken, payload);
+      return;
+    }
+
+    const userIds = (prestadores ?? []).map((p: any) => p.user_id).filter(Boolean);
+
+    if (!userIds.length) {
+      this.logger.log('Sin prestadores disponibles en el área para notificar');
+      return;
+    }
+
+    await this.notifyUsers(userIds, payload.title, payload.body, accessToken, payload.data);
+    this.logger.log(`Push enviado a ${userIds.length} prestadores para rubro ${rubroId}`);
+  }
+
+  // Fallback: match solo por rubro (sin PostGIS) — usado durante migración
+  private async notifyPrestadoresFallback(
     rubroId: string,
     accessToken: string,
     payload: { title: string; body: string; data?: Record<string, any> },
   ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    try {
-      const { data: prestadores, error } = await supabase
-        .from('perfiles_prestadores')
-        .select('user_id')
-        .eq('rubro_id', rubroId)
-        .eq('disponible', true)
-        .eq('esta_verificado', true);
+    const { data: prestadores, error } = await supabase
+      .from('prestador_rubros')
+      .select('prestador_id')
+      .eq('rubro_id', rubroId);
 
-      if (error) {
-        if (error.message?.includes('expo_push_tokens')) {
-          this.logger.warn('Push tokens table missing; skip push.');
-          return;
-        }
-        this.logger.error(`Failed to fetch prestadores for push: ${error.message}`);
-        return;
-      }
+    if (error || !prestadores?.length) return;
 
-      const userIds =
-        prestadores
-          ?.map((p: any) => p.user_id)
-          .filter((id: string | undefined) => !!id) || [];
+    const prestadorIds = prestadores.map((p: any) => p.prestador_id);
 
-      if (!userIds.length) {
-        this.logger.log('No prestadores disponibles para notificar.');
-        return;
-      }
+    const { data: disponibles } = await supabase
+      .from('perfiles_prestadores')
+      .select('id')
+      .in('id', prestadorIds)
+      .eq('disponible', true)
+      .eq('esta_verificado', true)
+      .eq('suscripcion_activa', true);
 
-      await this.notifyUsers(
-        userIds,
-        payload.title,
-        payload.body,
-        accessToken,
-        payload.data,
-      );
-    } catch (error) {
-      this.logger.error(`notifyPrestadoresForRubro error: ${error.message}`);
-    }
+    const userIds = (disponibles ?? []).map((p: any) => p.id);
+    if (!userIds.length) return;
+
+    await this.notifyUsers(userIds, payload.title, payload.body, accessToken, payload.data);
   }
 
-  private async sendPushNotifications(
+  private async sendPush(
     messages: Array<{ to: string; title: string; body: string; data?: Record<string, any> }>,
   ) {
-    if (!messages.length) {
-      return;
-    }
+    if (!messages.length) return;
 
     try {
       const response = await fetch(this.expoEndpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(messages),
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        this.logger.error(`Expo push failed: ${response.status} - ${errorText}`);
+        this.logger.error(`Expo push falló: ${response.status}`);
         return;
       }
 
       const result = (await response.json()) as { data?: Array<{ status: string; message?: string }> };
       result?.data?.forEach((r) => {
-        if (r.status !== 'ok') {
-          this.logger.warn(`Expo push ticket returned non-ok status: ${r.message}`);
-        }
+        if (r.status !== 'ok') this.logger.warn(`Expo push no-ok: ${r.message}`);
       });
-    } catch (error) {
-      this.logger.error(`sendPushNotifications error: ${error.message}`);
+    } catch (err: any) {
+      this.logger.error(`sendPush error: ${err.message}`);
     }
   }
 
