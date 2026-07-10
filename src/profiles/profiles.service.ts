@@ -118,7 +118,7 @@ export class ProfilesService {
 
     const { data: calificaciones } = await supabase
       .from('calificaciones')
-      .select('puntaje, comentario, created_at')
+      .select('puntuacion, comentario, created_at, cliente:cliente_id(nombre)')
       .eq('prestador_id', prestadorId)
       .order('created_at', { ascending: false })
       .limit(10);

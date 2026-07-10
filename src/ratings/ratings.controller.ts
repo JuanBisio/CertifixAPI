@@ -31,4 +31,19 @@ export class RatingsController {
   async getRatingsPrestador(@Param('id') id: string) {
     return this.ratingsService.getRatingsPrestador(id);
   }
+
+  @Post('cliente')
+  @UseGuards(SupabaseAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'El prestador califica al cliente de una solicitud finalizada o cerrada' })
+  @ApiResponse({ status: 201, description: 'Calificación creada' })
+  @ApiResponse({ status: 400, description: 'Solicitud no finalizada/cerrada o ya calificada' })
+  @ApiResponse({ status: 403, description: 'No es tu solicitud' })
+  async createRatingCliente(
+    @CurrentUser() user: User,
+    @AccessToken() accessToken: string,
+    @Body() dto: CreateRatingDto,
+  ) {
+    return this.ratingsService.createRatingCliente(user.id, dto, accessToken);
+  }
 }

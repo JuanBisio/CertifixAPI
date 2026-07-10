@@ -76,6 +76,61 @@ export class RatingsService {
     return { rating };
   }
 
+  async createRatingCliente(prestadorId: string, dto: CreateRatingDto, accessToken: string) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+
+    const { data: solicitud, error: solError } = await supabase
+      .from('solicitudes_trabajo')
+      .select('id, cliente_id, prestador_id, estado')
+      .eq('id', dto.solicitud_id)
+      .single();
+
+    if (solError || !solicitud) {
+      throw new BadRequestException('Solicitud no encontrada');
+    }
+
+    if (solicitud.prestador_id !== prestadorId) {
+      throw new ForbiddenException('No podés calificar una solicitud que no es tuya');
+    }
+
+    if (!['finalizado', 'cerrado'].includes(solicitud.estado)) {
+      throw new BadRequestException('Solo se puede calificar al cliente en estado finalizado o cerrado');
+    }
+
+    const { data: existing } = await supabase
+      .from('calificaciones_cliente')
+      .select('id')
+      .eq('solicitud_id', dto.solicitud_id)
+      .single();
+
+    if (existing) {
+      throw new BadRequestException('Ya calificaste al cliente de esta solicitud');
+    }
+
+    const { data: rating, error: insertError } = await supabase
+      .from('calificaciones_cliente')
+      .insert({
+        solicitud_id: dto.solicitud_id,
+        prestador_id: prestadorId,
+        cliente_id: solicitud.cliente_id,
+        puntuacion: dto.puntaje,
+        comentario: dto.comentario ?? null,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      this.logger.error(`Error insertando calificación de cliente: ${insertError.message}`);
+      throw new BadRequestException('Error guardando la calificación');
+    }
+
+    this.logger.log(
+      `Calificación de cliente creada: solicitud=${dto.solicitud_id} cliente=${solicitud.cliente_id} puntaje=${dto.puntaje}`,
+    );
+
+    return { rating };
+  }
+
   async getRatingsPrestador(prestadorId: string) {
     const supabase = this.supabaseService.getServiceClient();
 
