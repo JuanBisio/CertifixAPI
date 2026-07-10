@@ -41,7 +41,7 @@ COMMENT ON TABLE suscripcion_pagos IS 'Historial de cobros de la suscripción me
 -- 3. Actualizar el matching de solicitudes: solo prestadores con suscripción activa
 --    reciben notificaciones de nuevas solicitudes.
 CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
-  p_rubro_id  UUID,
+  p_rubro_id  TEXT,
   p_lon       DOUBLE PRECISION,
   p_lat       DOUBLE PRECISION
 )

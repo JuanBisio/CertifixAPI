@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_calificaciones_prestador
 -- =============================================================
 
 CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
-  p_rubro_id  UUID,
+  p_rubro_id  TEXT,
   p_lon       DOUBLE PRECISION,
   p_lat       DOUBLE PRECISION
 )

@@ -88,7 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_calificaciones_prestador
 
 -- RPC: get_prestadores_para_solicitud
 CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
-  p_rubro_id  UUID,
+  p_rubro_id  TEXT,
   p_lon       DOUBLE PRECISION,
   p_lat       DOUBLE PRECISION
 )
@@ -325,7 +325,7 @@ WITH CHECK (auth.uid() = prestador_id);
 COMMENT ON TABLE suscripcion_pagos IS 'Historial de cobros de la suscripción mensual del prestador a CertiFix';
 
 CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
-  p_rubro_id  UUID,
+  p_rubro_id  TEXT,
   p_lon       DOUBLE PRECISION,
   p_lat       DOUBLE PRECISION
 )
