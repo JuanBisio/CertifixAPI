@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SupabaseService } from '../supabase/supabase.service';
+import { SubscriptionsService } from './subscriptions.service';
 
 const REMINDER_WINDOW_DAYS = 3;
 
@@ -8,13 +9,46 @@ const REMINDER_WINDOW_DAYS = 3;
 export class SubscriptionsCronService {
   private readonly logger = new Logger(SubscriptionsCronService.name);
 
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   // Todos los días a las 4am: desactivar suscripciones vencidas y avisar próximos vencimientos
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async checkVencimientos() {
     await this.desactivarVencidas();
     await this.recordarProximosVencimientos();
+  }
+
+  // Cada 6hs: re-consultar a MercadoPago el estado real de los preapprovals activos.
+  // Sirve de red de seguridad si se pierde algún webhook, y es el mecanismo para probar
+  // el flujo completo en local (no hay WEBHOOK_URL público en desarrollo).
+  @Cron(CronExpression.EVERY_6_HOURS)
+  async sincronizarPreapprovals() {
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data: prestadores, error } = await supabase
+      .from('perfiles_prestadores')
+      .select('id, mp_preapproval_id')
+      .not('mp_preapproval_id', 'is', null);
+
+    if (error) {
+      this.logger.error(`Error buscando preapprovals para sincronizar: ${error.message}`);
+      return;
+    }
+
+    for (const prestador of prestadores ?? []) {
+      try {
+        await this.subscriptionsService.syncPreapprovalStatus(prestador.mp_preapproval_id);
+      } catch (err: any) {
+        this.logger.error(`Error sincronizando preapproval de prestador ${prestador.id}: ${err.message}`);
+      }
+    }
+
+    if (prestadores?.length) {
+      this.logger.log(`Sincronizados ${prestadores.length} preapprovals con MercadoPago`);
+    }
   }
 
   private async desactivarVencidas() {

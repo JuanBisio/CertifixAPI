@@ -374,3 +374,36 @@ ON calificaciones_cliente FOR INSERT
 WITH CHECK (auth.uid() = prestador_id);
 
 COMMENT ON TABLE calificaciones_cliente IS 'Calificación del prestador hacia el cliente al finalizar un trabajo (mutua con calificaciones cliente→prestador)';
+
+-- ──────────────────────────────────────────────────────────────
+-- BLOQUE N+2: Resolución de disputas — panel admin
+-- ──────────────────────────────────────────────────────────────
+
+ALTER TABLE disputas
+ADD COLUMN IF NOT EXISTS descargo_prestador TEXT,
+ADD COLUMN IF NOT EXISTS nota_resolucion TEXT,
+ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+
+-- ──────────────────────────────────────────────────────────────
+-- BLOQUE N+2: Migrar suscripción a la API de Preapproval de MercadoPago
+-- ──────────────────────────────────────────────────────────────
+
+ALTER TABLE perfiles_prestadores
+  ADD COLUMN IF NOT EXISTS mp_preapproval_id TEXT,
+  ADD COLUMN IF NOT EXISTS suscripcion_card_last_four TEXT,
+  ADD COLUMN IF NOT EXISTS suscripcion_card_brand TEXT;
+
+ALTER TABLE suscripcion_pagos
+  ADD COLUMN IF NOT EXISTS mp_preapproval_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_prestadores_mp_preapproval
+  ON perfiles_prestadores(mp_preapproval_id)
+  WHERE mp_preapproval_id IS NOT NULL;
+
+-- ──────────────────────────────────────────────────────────────
+-- BLOQUE N+3: Cancelación diferida + detección de renovaciones
+-- ──────────────────────────────────────────────────────────────
+
+ALTER TABLE perfiles_prestadores
+  ADD COLUMN IF NOT EXISTS suscripcion_cancelada BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS suscripcion_charged_quantity INTEGER NOT NULL DEFAULT 0;
