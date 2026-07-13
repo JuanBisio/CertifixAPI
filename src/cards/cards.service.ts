@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
-import { SaveCardDto, PaymentMethodResponseDto, PayWithSavedCardDto } from './dto/cards.dto';
+import { SaveCardDto, PaymentMethodResponseDto } from './dto/cards.dto';
 import { MercadoPagoConfig, Customer, CardToken, Payment } from 'mercadopago';
 
 @Injectable()
@@ -289,120 +289,6 @@ export class CardsService {
     } catch (err: any) {
       this.logger.error(`chargeSavedCard failed: ${err.message}`);
       return { success: false, status: 'failed', error: err.message };
-    }
-  }
-
-  /**
-   * Processes a payment using a saved card.
-   */
-  async payWithSavedCard(
-    dto: PayWithSavedCardDto,
-    userId: string,
-    accessToken: string, // Needed for auth client calls? No, we use service client, but maybe needed for other things?
-  ): Promise<{ success: boolean; payment_id?: string; status?: string; error?: string }> {
-    const supabase = this.supabaseService.getServiceClient();
-
-    // Get the saved card
-    const { data: savedCard, error: cardError } = await supabase
-      .from('users_payment_methods')
-      .select('*')
-      .eq('id', dto.payment_method_id)
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .single();
-
-    if (cardError || !savedCard) {
-      throw new NotFoundException('Payment method not found');
-    }
-
-    // Get the solicitud
-    const { data: solicitud, error: solicitudError } = await supabase
-      .from('solicitudes_trabajo')
-      .select('id, cliente_id, monto, estado')
-      .eq('id', dto.solicitud_id)
-      .single();
-
-    if (solicitudError || !solicitud) {
-      throw new NotFoundException('Solicitud not found');
-    }
-
-    if (solicitud.cliente_id !== userId) {
-      throw new BadRequestException('Not authorized');
-    }
-
-    if (solicitud.estado !== 'aceptado') {
-      throw new BadRequestException(`Cannot pay in state: ${solicitud.estado}`);
-    }
-
-    // Get customer email
-    const { data: profile } = await supabase
-      .from('perfiles')
-      .select('nombre')
-      .eq('id', userId)
-      .single();
-
-    if (!solicitud.monto || Number(solicitud.monto) <= 0) {
-      throw new BadRequestException(`El monto de la solicitud es inválido: ${solicitud.monto}`);
-    }
-
-    // Generate a new token for the saved card (required for payment)
-    const token = await this.generateCardToken(savedCard.mp_card_id);
-
-    try {
-      this.logger.log(`Processing payment for solicitud: ${solicitud.id}, Amount: ${solicitud.monto}, Card Brand: ${savedCard.card_brand}`);
-
-      const payload = {
-          transaction_amount: Number(solicitud.monto),
-          token: token,
-          description: 'Pago CertiFix',
-          installments: dto.installments || 1,
-          payment_method_id: savedCard.card_brand,
-          payer: {
-            type: 'customer',
-            id: savedCard.mp_customer_id,
-          },
-      };
-
-      this.logger.log(`MercadoPago Payload: ${JSON.stringify(payload)}`);
-
-      // Process payment with saved card
-      const mpPayment = await this.paymentClient.create({
-        body: payload,
-      });
-
-      const status = mpPayment.status === 'approved' ? 'completed' : 'failed';
-
-      // Save payment record
-      const paymentId = crypto.randomUUID();
-      await supabase.from('payments').insert({
-        id: paymentId,
-        solicitud_id: dto.solicitud_id,
-        user_id: userId,
-        amount: solicitud.monto,
-        platform_fee: solicitud.monto * 0.10,
-        provider_amount: solicitud.monto * 0.90,
-        status,
-        provider_transaction_id: String(mpPayment.id),
-        payment_method: savedCard.card_brand,
-      });
-
-      // Update solicitud if approved
-      if (status === 'completed') {
-        await supabase
-          .from('solicitudes_trabajo')
-          .update({ estado: 'pagado' })
-          .eq('id', dto.solicitud_id);
-      }
-
-      return {
-        success: status === 'completed',
-        payment_id: paymentId,
-        status,
-        error: status === 'failed' ? 'Pago rechazado' : undefined,
-      };
-    } catch (err: any) {
-      this.logger.error(`Payment failed: ${err.message}`);
-      return { success: false, error: err.message };
     }
   }
 

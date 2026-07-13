@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SaveCardDto {
@@ -44,19 +44,4 @@ export class PaymentMethodResponseDto {
 
   @ApiProperty()
   created_at: string;
-}
-
-export class PayWithSavedCardDto {
-  @ApiProperty({ description: 'UUID of the solicitud to pay for' })
-  @IsString()
-  solicitud_id: string;
-
-  @ApiProperty({ description: 'ID of the saved payment method' })
-  @IsString()
-  payment_method_id: string;
-
-  @ApiPropertyOptional({ description: 'Number of installments' })
-  @IsOptional()
-  @IsNumber()
-  installments?: number;
 }

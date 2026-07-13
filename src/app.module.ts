@@ -9,9 +9,6 @@ import { SolicitudesModule } from './solicitudes/solicitudes.module';
 import { EvidenciasModule } from './evidencias/evidencias.module';
 import { DisputasModule } from './disputas/disputas.module';
 import { NotificationsModule } from './notifications/notifications.module';
-// PaymentsModule (pago del trabajo cliente→prestador vía MercadoPago) — legacy, obsoleto.
-// El precio del trabajo se acuerda en persona; ver SubscriptionsModule para el cobro real.
-// import { PaymentsModule } from './payments/payments.module';
 import { CardsModule } from './cards/cards.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { RatingsModule } from './ratings/ratings.module';
