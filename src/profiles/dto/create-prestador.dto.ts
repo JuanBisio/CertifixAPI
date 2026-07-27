@@ -1,13 +1,10 @@
 import {
   IsArray,
-  IsEnum,
-  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
-  Max,
-  Min,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -23,15 +20,19 @@ class CoordenadasDto {
   lat: number;
 }
 
+// RQ-01: rango horario real (HH:mm) en vez de los 3 bloques fijos mañana/tarde/noche.
+const HORA_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
 class FranjasHorariasDto {
-  @ApiProperty({ example: false })
-  manana: boolean;
+  @ApiProperty({ example: '09:00', description: 'Hora desde (HH:mm)' })
+  @IsString()
+  @Matches(HORA_REGEX, { message: 'desde debe tener formato HH:mm' })
+  desde: string;
 
-  @ApiProperty({ example: true })
-  tarde: boolean;
-
-  @ApiProperty({ example: false })
-  noche: boolean;
+  @ApiProperty({ example: '18:00', description: 'Hora hasta (HH:mm)' })
+  @IsString()
+  @Matches(HORA_REGEX, { message: 'hasta debe tener formato HH:mm' })
+  hasta: string;
 }
 
 export class CreatePrestadorDto {
@@ -43,14 +44,10 @@ export class CreatePrestadorDto {
   @IsString({ each: true })
   rubros_ids: string[];
 
-  @ApiProperty({ example: 10, description: 'Radio de cobertura en km (2–20)' })
-  @IsInt()
-  @Min(2)
-  @Max(20)
-  radio_km: number;
-
-  @ApiProperty({ example: { manana: false, tarde: true, noche: false } })
+  @ApiProperty({ example: { desde: '09:00', hasta: '18:00' } })
   @IsObject()
+  @ValidateNested()
+  @Type(() => FranjasHorariasDto)
   franjas_horarias: FranjasHorariasDto;
 
   @ApiPropertyOptional({ example: { lon: -58.4261, lat: -34.5875 } })
@@ -59,9 +56,4 @@ export class CreatePrestadorDto {
   @ValidateNested()
   @Type(() => CoordenadasDto)
   coordenadas?: CoordenadasDto;
-
-  @ApiPropertyOptional({ example: 'Palermo, CABA' })
-  @IsOptional()
-  @IsString()
-  zona_nombre?: string;
 }

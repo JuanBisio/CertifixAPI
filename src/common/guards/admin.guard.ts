@@ -23,8 +23,10 @@ export class AdminGuard implements CanActivate {
       throw new ForbiddenException('Access denied');
     }
 
-    // Dev bypass (set ADMIN_BYPASS=true in env to skip admin check)
-    if (process.env.ADMIN_BYPASS === 'true') {
+    // Dev bypass (set ADMIN_BYPASS=true in env to skip admin check).
+    // Gateado también por NODE_ENV: aunque ADMIN_BYPASS quede mal seteada en prod
+    // por error de copy-paste del .env, en producción nunca tiene efecto.
+    if (process.env.ADMIN_BYPASS === 'true' && process.env.NODE_ENV !== 'production') {
       this.logger.warn('ADMIN_BYPASS enabled: skipping admin check');
       return true;
     }

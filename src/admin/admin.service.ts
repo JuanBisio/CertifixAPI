@@ -8,8 +8,12 @@ export class AdminService {
   constructor(private supabaseService: SupabaseService) {}
 
   async listPrestadores(accessToken: string, verificado?: boolean) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
-    let query = supabase.from('perfiles_prestadores').select('*');
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
+    let query = supabase.from('perfiles_prestadores').select('*, perfiles(nombre)');
 
     if (typeof verificado === 'boolean') {
       query = query.eq('esta_verificado', verificado);
@@ -30,7 +34,11 @@ export class AdminService {
     value: boolean,
     tipoVerificacion?: 'estandar' | 'premium',
   ) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
 
     const updateData: Record<string, any> = { esta_verificado: value };
     if (value && tipoVerificacion) {
@@ -53,7 +61,11 @@ export class AdminService {
   }
 
   async setDisponible(accessToken: string, prestadorId: string, value: boolean) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
     const { data, error } = await supabase
       .from('perfiles_prestadores')
       .update({ disponible: value })
@@ -70,10 +82,14 @@ export class AdminService {
   }
 
   async listSuscripciones(accessToken: string) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .select('id, suscripcion_activa, suscripcion_vence_at, esta_verificado, disponible, perfiles(nombre_completo)')
+      .select('id, suscripcion_activa, suscripcion_vence_at, esta_verificado, disponible, trabajos_gratis_usados, perfiles(nombre)')
       .order('suscripcion_vence_at', { ascending: true });
 
     if (error) {
@@ -85,7 +101,11 @@ export class AdminService {
   }
 
   async listPayments(accessToken: string) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
     const { data, error } = await supabase
       .from('payments')
       .select('*')
@@ -100,7 +120,11 @@ export class AdminService {
   }
 
   async listDisputas(accessToken: string) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
     const { data, error } = await supabase
       .from('disputas')
       .select('*')
@@ -115,7 +139,11 @@ export class AdminService {
   }
 
   async resolveDisputa(accessToken: string, disputaId: string, resolution: string) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
     
     const newEstado = resolution === 'a_favor_cliente' 
       ? 'resuelta_a_favor_cliente' 

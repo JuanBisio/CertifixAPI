@@ -2,7 +2,6 @@ import { Injectable, Logger, BadRequestException, UnauthorizedException } from '
 import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { SendOtpDto, VerifyOtpDto } from './dto/phone-otp.dto';
 import { ProfilesService } from '../profiles/profiles.service';
 
 @Injectable()
@@ -148,59 +147,6 @@ export class AuthService {
     }
   }
 
-  // ─── PHONE OTP ────────────────────────────────────────────────────────────
-
-  async sendOtp(dto: SendOtpDto) {
-    const supabase = this.supabaseService.getClient();
-    const { error } = await supabase.auth.signInWithOtp({ phone: dto.phone });
-    if (error) {
-      this.logger.error(`sendOtp error: ${error.message}`);
-      throw new BadRequestException(error.message);
-    }
-    return { ok: true, message: 'OTP enviado' };
-  }
-
-  async verifyOtp(dto: VerifyOtpDto) {
-    const supabase = this.supabaseService.getClient();
-    const { data, error } = await supabase.auth.verifyOtp({
-      phone: dto.phone,
-      token: dto.token,
-      type: 'sms',
-    });
-    if (error) {
-      this.logger.error(`verifyOtp error: ${error.message}`);
-      throw new UnauthorizedException('Código OTP inválido o expirado');
-    }
-    if (!data.user || !data.session) {
-      throw new UnauthorizedException('Verificación fallida');
-    }
-
-    // Crear perfil si es la primera vez que inicia sesión por teléfono
-    const serviceSupabase = this.supabaseService.getServiceClient();
-    const { data: existing } = await serviceSupabase
-      .from('perfiles')
-      .select('id')
-      .eq('id', data.user.id)
-      .single();
-
-    if (!existing) {
-      await serviceSupabase.from('perfiles').insert({
-        id: data.user.id,
-        nombre: null,
-        rol: null,
-        telefono: dto.phone,
-        created_at: new Date().toISOString(),
-      });
-    }
-
-    this.logger.log(`OTP verificado para ${dto.phone} → usuario ${data.user.id}`);
-    return {
-      user: data.user,
-      session: data.session,
-      access_token: data.session.access_token,
-    };
-  }
-
   async getCurrentUser(userId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
     const serviceSupabase = this.supabaseService.getServiceClient();
@@ -245,6 +191,8 @@ export class AuthService {
         nombre: profile.nombre,
         telefono: profile.telefono,
         rol: profile.rol,
+        strikes_count: profile.strikes_count,
+        suspendido: profile.suspendido,
         prestador_profile: this.profilesService.mapPrestadorProfile(prestadorProfile),
       };
     } catch (error) {

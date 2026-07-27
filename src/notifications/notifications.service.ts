@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterTokenDto } from './dto/register-token.dto';
+import { TRABAJOS_GRATIS_LIMITE } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class NotificationsService {
@@ -114,7 +115,7 @@ export class NotificationsService {
       .in('id', prestadorIds)
       .eq('disponible', true)
       .eq('esta_verificado', true)
-      .eq('suscripcion_activa', true);
+      .or(`suscripcion_activa.eq.true,trabajos_gratis_usados.lt.${TRABAJOS_GRATIS_LIMITE}`);
 
     const userIds = (disponibles ?? []).map((p: any) => p.id);
     if (!userIds.length) return;

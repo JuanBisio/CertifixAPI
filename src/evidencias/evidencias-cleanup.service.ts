@@ -19,7 +19,9 @@ type TrabajoState = {
 export class EvidenciasCleanupService {
   private readonly logger = new Logger(EvidenciasCleanupService.name);
   private readonly bucket = 'evidencias';
-  private readonly disputeStates = new Set(['reclamo', 'disputa', 'en_disputa', 'disputed']);
+  // Estados de disputas.estado que deben bloquear el borrado — no existe un
+  // estado de disputa en solicitudes_trabajo.estado (esa columna no lo modela).
+  private readonly disputeStates = new Set(['abierta', 'en_revision']);
   private readonly cleanupStates = new Set(['finalizado', 'cerrado']);
 
   constructor(private readonly supabaseService: SupabaseService) {}
@@ -65,12 +67,22 @@ export class EvidenciasCleanupService {
       }
     });
 
+    // El estado de disputa vive en disputas.estado, no en solicitudes_trabajo.estado
+    // (esa columna nunca tuvo esos valores) — hay que consultar la tabla real.
+    const { data: disputasAbiertas, error: disputasError } = await supabase
+      .from('disputas')
+      .select('trabajo_id, estado')
+      .in('trabajo_id', trabajoIds);
+
+    if (disputasError) {
+      this.logger.error(`Unable to fetch disputas for cleanup: ${disputasError.message}`);
+      return;
+    }
+
     const blockedTrabajoIds = new Set(
-      (trabajos || [])
-        .filter((t: TrabajoState | null) =>
-          t?.estado ? this.disputeStates.has(String(t.estado).toLowerCase()) : false,
-        )
-        .map((t) => t!.id),
+      (disputasAbiertas || [])
+        .filter((d) => d?.estado && this.disputeStates.has(String(d.estado).toLowerCase()))
+        .map((d) => d.trabajo_id),
     );
 
     let deleted = 0;

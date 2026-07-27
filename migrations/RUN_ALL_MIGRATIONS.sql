@@ -407,3 +407,237 @@ CREATE INDEX IF NOT EXISTS idx_prestadores_mp_preapproval
 ALTER TABLE perfiles_prestadores
   ADD COLUMN IF NOT EXISTS suscripcion_cancelada BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS suscripcion_charged_quantity INTEGER NOT NULL DEFAULT 0;
+
+-- ──────────────────────────────────────────────────────────────
+-- BLOQUE N+4: Promo de lanzamiento — primeros 3 trabajos gratis por prestador
+-- ──────────────────────────────────────────────────────────────
+
+ALTER TABLE perfiles_prestadores
+  ADD COLUMN IF NOT EXISTS trabajos_gratis_usados INTEGER NOT NULL DEFAULT 0
+    CHECK (trabajos_gratis_usados >= 0);
+
+CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
+  p_rubro_id  TEXT,
+  p_lon       DOUBLE PRECISION,
+  p_lat       DOUBLE PRECISION
+)
+RETURNS TABLE(user_id UUID) AS $$
+  SELECT pp.id AS user_id
+  FROM perfiles_prestadores pp
+  JOIN prestador_rubros pr ON pr.prestador_id = pp.id
+  WHERE pr.rubro_id = p_rubro_id
+    AND pp.disponible = true
+    AND pp.esta_verificado = true
+    AND (pp.suscripcion_activa = true OR pp.trabajos_gratis_usados < 3)
+    AND pp.ubicacion_base IS NOT NULL
+    AND ST_DWithin(
+      pp.ubicacion_base::geography,
+      ST_SetSRID(ST_MakePoint(p_lon, p_lat), 4326)::geography,
+      pp.radio_km * 1000.0
+    )
+$$ LANGUAGE SQL STABLE;
+
+CREATE OR REPLACE FUNCTION increment_trabajos_gratis_usados(p_prestador_id UUID)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE perfiles_prestadores
+  SET trabajos_gratis_usados = LEAST(trabajos_gratis_usados + 1, 3)
+  WHERE id = p_prestador_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER
+   SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION increment_trabajos_gratis_usados(UUID) FROM anon;
+REVOKE EXECUTE ON FUNCTION increment_trabajos_gratis_usados(UUID) FROM authenticated;
+GRANT EXECUTE ON FUNCTION increment_trabajos_gratis_usados(UUID) TO service_role;
+
+-- ──────────────────────────────────────────────────────────────
+-- BLOQUE N+5: Modo PROGRAMADO — candidatos (hasta 3) y chat multi-hilo
+-- ──────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS solicitud_candidatos (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  solicitud_id  UUID NOT NULL REFERENCES solicitudes_trabajo(id) ON DELETE CASCADE,
+  prestador_id  UUID NOT NULL REFERENCES perfiles_prestadores(id) ON DELETE CASCADE,
+  estado        TEXT NOT NULL DEFAULT 'postulado'
+                  CHECK (estado IN ('postulado', 'elegido', 'no_elegido')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  decided_at    TIMESTAMPTZ,
+  UNIQUE (solicitud_id, prestador_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_solicitud_candidatos_solicitud ON solicitud_candidatos (solicitud_id);
+CREATE INDEX IF NOT EXISTS idx_solicitud_candidatos_prestador ON solicitud_candidatos (prestador_id);
+
+ALTER TABLE solicitudes_trabajo
+  ADD COLUMN IF NOT EXISTS postulacion_deadline_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS candidatos_count INTEGER NOT NULL DEFAULT 0
+    CHECK (candidatos_count >= 0 AND candidatos_count <= 3);
+
+CREATE OR REPLACE FUNCTION postularse_a_solicitud(
+  p_solicitud_id UUID,
+  p_prestador_id UUID
+)
+RETURNS solicitud_candidatos
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_updated_id UUID;
+  v_row solicitud_candidatos;
+BEGIN
+  UPDATE solicitudes_trabajo
+  SET candidatos_count = candidatos_count + 1
+  WHERE id = p_solicitud_id
+    AND estado = 'buscando'
+    AND urgencia = 'programado'
+    AND candidatos_count < 3
+    AND (postulacion_deadline_at IS NULL OR postulacion_deadline_at > NOW())
+  RETURNING id INTO v_updated_id;
+
+  IF v_updated_id IS NULL THEN
+    RAISE EXCEPTION 'cupo_completo_o_no_disponible' USING ERRCODE = 'P0001';
+  END IF;
+
+  BEGIN
+    INSERT INTO solicitud_candidatos (solicitud_id, prestador_id, estado)
+    VALUES (p_solicitud_id, p_prestador_id, 'postulado')
+    RETURNING * INTO v_row;
+  EXCEPTION WHEN unique_violation THEN
+    UPDATE solicitudes_trabajo SET candidatos_count = candidatos_count - 1 WHERE id = p_solicitud_id;
+    RAISE EXCEPTION 'ya_postulado' USING ERRCODE = 'P0002';
+  END;
+
+  RETURN v_row;
+END;
+$$;
+
+ALTER TABLE mensajes
+  ADD COLUMN IF NOT EXISTS candidato_id UUID REFERENCES solicitud_candidatos(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_mensajes_candidato ON mensajes (candidato_id);
+
+DROP POLICY IF EXISTS "Users can view messages for their jobs" ON mensajes;
+DROP POLICY IF EXISTS "Users can insert messages for their jobs" ON mensajes;
+
+CREATE POLICY "mensajes_select" ON mensajes FOR SELECT
+USING (
+  sender_id = auth.uid()
+  OR (
+    candidato_id IS NULL AND EXISTS (
+      SELECT 1 FROM solicitudes_trabajo s
+      WHERE s.id = mensajes.solicitud_id
+        AND (s.cliente_id = auth.uid() OR s.prestador_id = auth.uid())
+    )
+  )
+  OR (
+    candidato_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM solicitud_candidatos c
+      JOIN solicitudes_trabajo s ON s.id = c.solicitud_id
+      WHERE c.id = mensajes.candidato_id
+        AND (c.prestador_id = auth.uid() OR s.cliente_id = auth.uid())
+    )
+  )
+);
+
+CREATE POLICY "mensajes_insert" ON mensajes FOR INSERT
+WITH CHECK (
+  sender_id = auth.uid()
+  AND (
+    (candidato_id IS NULL AND EXISTS (
+      SELECT 1 FROM solicitudes_trabajo s
+      WHERE s.id = solicitud_id AND (s.cliente_id = auth.uid() OR s.prestador_id = auth.uid())
+    ))
+    OR
+    (candidato_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM solicitud_candidatos c
+      JOIN solicitudes_trabajo s ON s.id = c.solicitud_id
+      WHERE c.id = candidato_id AND c.solicitud_id = solicitud_id
+        AND (c.prestador_id = auth.uid() OR s.cliente_id = auth.uid())
+    ))
+  )
+);
+
+DROP FUNCTION IF EXISTS mark_messages_read(UUID);
+
+CREATE FUNCTION mark_messages_read(p_solicitud_id UUID, p_candidato_id UUID DEFAULT NULL)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE mensajes
+  SET read = true
+  WHERE solicitud_id = p_solicitud_id
+    AND sender_id != auth.uid()
+    AND read = false
+    AND candidato_id IS NOT DISTINCT FROM p_candidato_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ──────────────────────────────────────────────────────────────
+-- BLOQUE N+6: CAL-02 — subcategorías opcionales de calificación (cliente → prestador)
+-- ──────────────────────────────────────────────────────────────
+
+ALTER TABLE calificaciones
+  ADD COLUMN IF NOT EXISTS comunicacion INTEGER CHECK (comunicacion BETWEEN 1 AND 5),
+  ADD COLUMN IF NOT EXISTS puntualidad  INTEGER CHECK (puntualidad  BETWEEN 1 AND 5),
+  ADD COLUMN IF NOT EXISTS atencion     INTEGER CHECK (atencion     BETWEEN 1 AND 5),
+  ADD COLUMN IF NOT EXISTS eficiencia   INTEGER CHECK (eficiencia   BETWEEN 1 AND 5);
+
+-- ──────────────────────────────────────────────────────────────
+-- BLOQUE N+6: Direcciones guardadas y reutilizables del cliente (UBI-02)
+-- ──────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS direcciones_guardadas (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+
+    alias         TEXT NOT NULL CHECK (char_length(alias) BETWEEN 1 AND 40),
+    direccion     TEXT NOT NULL,
+    zona_nombre   TEXT NOT NULL,
+    lat           DOUBLE PRECISION NOT NULL CHECK (lat BETWEEN -90 AND 90),
+    lon           DOUBLE PRECISION NOT NULL CHECK (lon BETWEEN -180 AND 180),
+    place_id      TEXT,
+
+    is_default    BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_direcciones_guardadas_user ON direcciones_guardadas(user_id);
+CREATE INDEX IF NOT EXISTS idx_direcciones_guardadas_user_activas
+  ON direcciones_guardadas(user_id) WHERE is_active = true;
+
+ALTER TABLE direcciones_guardadas ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Cliente ve sus propias direcciones guardadas"
+    ON direcciones_guardadas FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Cliente inserta sus propias direcciones guardadas"
+    ON direcciones_guardadas FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Cliente actualiza sus propias direcciones guardadas"
+    ON direcciones_guardadas FOR UPDATE
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Cliente elimina sus propias direcciones guardadas"
+    ON direcciones_guardadas FOR DELETE
+    USING (auth.uid() = user_id);
+
+CREATE OR REPLACE FUNCTION update_direcciones_guardadas_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+   SET search_path = public, pg_temp;
+
+CREATE TRIGGER trigger_direcciones_guardadas_updated_at
+    BEFORE UPDATE ON direcciones_guardadas
+    FOR EACH ROW
+    EXECUTE FUNCTION update_direcciones_guardadas_updated_at();
+
+COMMENT ON TABLE direcciones_guardadas IS
+  'Direcciones guardadas y reutilizables del cliente (UBI-02) — alias tipo Casa/Trabajo + coordenadas para reutilizar al crear una solicitud';

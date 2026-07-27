@@ -32,6 +32,12 @@ export class RatingsController {
     return this.ratingsService.getRatingsPrestador(id);
   }
 
+  @Get('cliente/:id')
+  @ApiOperation({ summary: 'Ver calificaciones públicas de un cliente (RQ-04)' })
+  async getRatingsCliente(@Param('id') id: string) {
+    return this.ratingsService.getRatingsCliente(id);
+  }
+
   @Post('cliente')
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()

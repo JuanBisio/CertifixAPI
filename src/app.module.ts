@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { SupabaseModule } from './supabase/supabase.module';
 import { AuthModule } from './auth/auth.module';
 import { ProfilesModule } from './profiles/profiles.module';
+import { AddressesModule } from './addresses/addresses.module';
 import { RubrosModule } from './rubros/rubros.module';
 import { SolicitudesModule } from './solicitudes/solicitudes.module';
 import { EvidenciasModule } from './evidencias/evidencias.module';
@@ -24,9 +26,17 @@ import { ScheduleModule } from '@nestjs/schedule';
       envFilePath: '.env',
     }),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([
+      {
+        // default global: 60 requests/minuto por IP; endpoints sensibles bajan este límite con @Throttle()
+        ttl: 60000,
+        limit: 60,
+      },
+    ]),
     SupabaseModule,
     AuthModule,
     ProfilesModule,
+    AddressesModule,
     RubrosModule,
     SolicitudesModule,
     EvidenciasModule,
@@ -42,6 +52,10 @@ import { ScheduleModule } from '@nestjs/schedule';
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
   ],
 })

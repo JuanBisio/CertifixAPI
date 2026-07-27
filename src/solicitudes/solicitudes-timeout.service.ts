@@ -19,10 +19,12 @@ export class SolicitudesTimeoutService {
     const now = new Date().toISOString();
 
     // Pasada 1: primer timeout (10 min) → notificar al cliente y dar 24h más
+    // (solo modo urgente: 'programado' usa postulacion_deadline_at, no timeout_at)
     const { data: primeraVez, error: err1 } = await supabase
       .from('solicitudes_trabajo')
       .select('id, cliente_id')
       .eq('estado', 'buscando')
+      .eq('urgencia', 'ahora')
       .lt('timeout_at', now)
       .is('timeout_notificado_at', null);
 
@@ -57,6 +59,7 @@ export class SolicitudesTimeoutService {
       .from('solicitudes_trabajo')
       .select('id, cliente_id')
       .eq('estado', 'buscando')
+      .eq('urgencia', 'ahora')
       .lt('timeout_at', now)
       .not('timeout_notificado_at', 'is', null);
 
@@ -86,6 +89,48 @@ export class SolicitudesTimeoutService {
           this.logger.log(`Solicitud ${solicitud.id} cancelada por timeout definitivo`);
         } catch (err: any) {
           this.logger.error(`Error cancelando solicitud ${solicitud.id}: ${err.message}`);
+        }
+      }
+    }
+
+    // Pasada 3: PROGRAMADO sin ningún candidato tras vencer el plazo de postulación → cancelar.
+    // Si ya hay 1-2 candidatos no se cancela: el cliente puede elegir cuando quiera,
+    // postularse_a_solicitud ya rechaza nuevas postulaciones pasado el deadline.
+    const { data: sinCandidatos, error: err3 } = await supabase
+      .from('solicitudes_trabajo')
+      .select('id, cliente_id')
+      .eq('estado', 'buscando')
+      .eq('urgencia', 'programado')
+      .eq('candidatos_count', 0)
+      .lt('postulacion_deadline_at', now);
+
+    if (err3) {
+      this.logger.error(`Error en checkTimeouts (pasada 3): ${err3.message}`);
+    } else if (sinCandidatos?.length) {
+      this.logger.log(`${sinCandidatos.length} solicitudes programadas a cancelar sin candidatos`);
+      for (const solicitud of sinCandidatos) {
+        try {
+          const { data: cancelada } = await supabase
+            .from('solicitudes_trabajo')
+            .update({ estado: 'cancelado' })
+            .eq('id', solicitud.id)
+            .eq('estado', 'buscando')
+            .eq('candidatos_count', 0)
+            .select('id')
+            .single();
+
+          if (!cancelada) continue;
+
+          await this.notificarCliente(
+            supabase,
+            solicitud.cliente_id,
+            solicitud.id,
+            'Solicitud cancelada',
+            'Ningún técnico se postuló a tiempo. Podés crear una nueva solicitud.',
+          );
+          this.logger.log(`Solicitud ${solicitud.id} cancelada por falta de postulaciones`);
+        } catch (err: any) {
+          this.logger.error(`Error cancelando solicitud programada ${solicitud.id}: ${err.message}`);
         }
       }
     }

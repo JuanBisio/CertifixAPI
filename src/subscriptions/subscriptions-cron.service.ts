@@ -55,9 +55,13 @@ export class SubscriptionsCronService {
     const supabase = this.supabaseService.getServiceClient();
     const nowIso = new Date().toISOString();
 
+    // No se toca `disponible` acá: un prestador puede seguir operando con créditos
+    // de la promo de lanzamiento (trabajos_gratis_usados < 3) aunque su suscripción
+    // haya vencido — es el RPC de matching el que decide exclusión real combinando
+    // suscripcion_activa con trabajos_gratis_usados.
     const { data: desactivados, error } = await supabase
       .from('perfiles_prestadores')
-      .update({ suscripcion_activa: false, disponible: false })
+      .update({ suscripcion_activa: false })
       .eq('suscripcion_activa', true)
       .lt('suscripcion_vence_at', nowIso)
       .select('id');

@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
 import {
@@ -56,6 +57,7 @@ export class SubscriptionsController {
   }
 
   @Post('webhook')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook de notificaciones de MercadoPago (Preapproval)' })
   async webhook(@Body() dto: PreapprovalWebhookDto): Promise<{ success: boolean }> {

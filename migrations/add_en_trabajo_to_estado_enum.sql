@@ -1,0 +1,11 @@
+-- RQ-09: nuevo estado 'en_trabajo' (intermedio entre 'en_camino' y 'finalizado').
+--
+-- El ROADMAP asumía "no requiere migración (no hay CHECK constraint de estado en
+-- DB)" — pero solicitudes_trabajo.estado es un ENUM nativo de Postgres
+-- (estado_trabajo), no una columna TEXT con CHECK. Un enum es una restricción
+-- distinta pero igual de bloqueante: sin este ALTER, cualquier UPDATE a
+-- estado='en_trabajo' falla con "invalid input value for enum estado_trabajo"
+-- (confirmado con una prueba end-to-end real contra Supabase).
+--
+-- ALTER TYPE ... ADD VALUE es aditivo — no toca ninguna fila ni valor existente.
+ALTER TYPE estado_trabajo ADD VALUE IF NOT EXISTS 'en_trabajo' AFTER 'en_camino';

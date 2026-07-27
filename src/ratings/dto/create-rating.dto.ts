@@ -16,4 +16,33 @@ export class CreateRatingDto {
   @IsOptional()
   @IsString()
   comentario?: string;
+
+  // CAL-02: subcategorías opcionales — solo aplican a la calificación del cliente hacia el prestador
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, description: 'Opcional' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  comunicacion?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, description: 'Opcional' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  puntualidad?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, description: 'Opcional' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  atencion?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, description: 'Opcional' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  eficiencia?: number;
 }

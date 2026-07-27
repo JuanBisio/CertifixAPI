@@ -33,6 +33,12 @@ export class SubscriptionStatusDto {
 
   @ApiPropertyOptional()
   card_brand?: string;
+
+  @ApiProperty({ description: 'Trabajos gratis de la promo de lanzamiento que le quedan (0 a 3)' })
+  trabajos_gratis_restantes: number;
+
+  @ApiProperty({ description: 'true si puede recibir solicitudes ahora (suscripción activa O créditos de promo disponibles)' })
+  puede_recibir_solicitudes: boolean;
 }
 
 export class SubscriptionPaymentDto {

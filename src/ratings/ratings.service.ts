@@ -45,7 +45,7 @@ export class RatingsService {
       throw new BadRequestException('Esta solicitud ya fue calificada');
     }
 
-    // Insertar calificación
+    // Insertar calificación (comunicacion/puntualidad/atencion/eficiencia son opcionales — CAL-02)
     const { data: rating, error: insertError } = await supabase
       .from('calificaciones')
       .insert({
@@ -54,6 +54,10 @@ export class RatingsService {
         cliente_id: clienteId,
         puntuacion: dto.puntaje,
         comentario: dto.comentario ?? null,
+        comunicacion: dto.comunicacion ?? null,
+        puntualidad: dto.puntualidad ?? null,
+        atencion: dto.atencion ?? null,
+        eficiencia: dto.eficiencia ?? null,
       })
       .select()
       .single();
@@ -136,7 +140,9 @@ export class RatingsService {
 
     const { data, error } = await supabase
       .from('calificaciones')
-      .select('puntuacion, comentario, created_at, clientes:cliente_id(nombre)')
+      .select(
+        'puntuacion, comentario, created_at, comunicacion, puntualidad, atencion, eficiencia, clientes:cliente_id(nombre)',
+      )
       .eq('prestador_id', prestadorId)
       .order('created_at', { ascending: false });
 
@@ -145,6 +151,46 @@ export class RatingsService {
       throw new BadRequestException('Error obteniendo calificaciones');
     }
 
-    return { ratings: data ?? [] };
+    const ratings = data ?? [];
+
+    // CAL-02: promedio por subcategoría, solo entre las reseñas que la completaron (son opcionales)
+    const promedio = (values: Array<number | null | undefined>) => {
+      const validos = values.filter((v): v is number => v != null);
+      if (!validos.length) return null;
+      return Math.round((validos.reduce((sum, v) => sum + v, 0) / validos.length) * 100) / 100;
+    };
+
+    const promedios = {
+      comunicacion: promedio(ratings.map((r: any) => r.comunicacion)),
+      puntualidad: promedio(ratings.map((r: any) => r.puntualidad)),
+      atencion: promedio(ratings.map((r: any) => r.atencion)),
+      eficiencia: promedio(ratings.map((r: any) => r.eficiencia)),
+    };
+
+    return { ratings, promedios };
+  }
+
+  // RQ-04: reputación del cliente — calificaciones que le dejaron los prestadores
+  // (calificaciones_cliente, sin subcategorías, solo puntuacion/comentario).
+  async getRatingsCliente(clienteId: string) {
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data, error } = await supabase
+      .from('calificaciones_cliente')
+      .select('puntuacion, comentario, created_at, prestador:prestador_id(nombre)')
+      .eq('cliente_id', clienteId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      this.logger.error(`Error obteniendo ratings de cliente: ${error.message}`);
+      throw new BadRequestException('Error obteniendo calificaciones');
+    }
+
+    const ratings = data ?? [];
+    const promedio = ratings.length
+      ? Math.round((ratings.reduce((sum, r: any) => sum + r.puntuacion, 0) / ratings.length) * 100) / 100
+      : null;
+
+    return { ratings, promedio };
   }
 }

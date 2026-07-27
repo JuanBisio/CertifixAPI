@@ -11,6 +11,7 @@ import {
 } from './dto/subscriptions.dto';
 
 export const SUBSCRIPTION_AMOUNT = 30000;
+export const TRABAJOS_GRATIS_LIMITE = 3;
 const SUBSCRIPTION_PERIOD_DAYS = 30;
 const BACK_URL = 'https://certifix.app';
 // Estados de un preapproval que no admiten reactivación — hay que crear uno nuevo.
@@ -35,13 +36,18 @@ export class SubscriptionsService {
 
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .select('suscripcion_activa, suscripcion_cancelada, suscripcion_vence_at, suscripcion_card_last_four, suscripcion_card_brand')
+      .select('suscripcion_activa, suscripcion_cancelada, suscripcion_vence_at, suscripcion_card_last_four, suscripcion_card_brand, trabajos_gratis_usados')
       .eq('id', prestadorId)
       .single();
 
     if (error || !data) {
       throw new BadRequestException('Perfil de prestador no encontrado');
     }
+
+    const trabajosGratisRestantes = Math.max(
+      TRABAJOS_GRATIS_LIMITE - (data.trabajos_gratis_usados ?? 0),
+      0,
+    );
 
     return {
       activa: data.suscripcion_activa,
@@ -50,6 +56,8 @@ export class SubscriptionsService {
       monto_mensual: SUBSCRIPTION_AMOUNT,
       card_last_four: data.suscripcion_card_last_four ?? undefined,
       card_brand: data.suscripcion_card_brand ?? undefined,
+      trabajos_gratis_restantes: trabajosGratisRestantes,
+      puede_recibir_solicitudes: data.suscripcion_activa || trabajosGratisRestantes > 0,
     };
   }
 

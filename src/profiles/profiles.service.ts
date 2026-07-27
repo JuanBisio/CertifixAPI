@@ -91,6 +91,8 @@ export class ProfilesService {
       nombre: profile.nombre,
       telefono: profile.telefono,
       rol: profile.rol,
+      strikes_count: profile.strikes_count,
+      suspendido: profile.suspendido,
       prestador_profile: this.mapPrestadorProfile(prestador),
     };
   }
@@ -100,9 +102,13 @@ export class ProfilesService {
   async getPublicProfile(prestadorId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
+    // `perfiles` no tiene columna de foto — la del prestador vive en
+    // perfiles_prestadores.foto_perfil_url (bug encontrado al implementar
+    // RQ-05: esto seleccionaba perfiles.foto_url, columna inexistente, y
+    // tiraba abajo el endpoint entero para cualquier llamada).
     const { data: profile, error } = await supabase
       .from('perfiles')
-      .select('id, nombre, foto_url')
+      .select('id, nombre')
       .eq('id', prestadorId)
       .single();
 
@@ -111,7 +117,7 @@ export class ProfilesService {
     const { data: prestador } = await supabase
       .from('perfiles_prestadores')
       .select(
-        'rating, trabajos_completados, radio_km, tipo_verificacion, esta_verificado, zona_nombre, prestador_rubros(rubro_id, rubros(id, nombre, icono))',
+        'rating, trabajos_completados, tipo_verificacion, esta_verificado, foto_perfil_url, prestador_rubros(rubro_id, rubros(id, nombre, icono))',
       )
       .eq('id', prestadorId)
       .single();
@@ -127,14 +133,16 @@ export class ProfilesService {
       profile: {
         id: profile.id,
         nombre: profile.nombre,
-        foto_url: profile.foto_url ?? null,
-        rating: prestador?.rating ?? 0,
-        trabajos_completados: prestador?.trabajos_completados ?? 0,
-        radio_km: prestador?.radio_km ?? null,
-        tipo_verificacion: prestador?.tipo_verificacion ?? 'estandar',
-        esta_verificado: prestador?.esta_verificado ?? false,
-        zona_nombre: prestador?.zona_nombre ?? null,
-        rubros: (prestador?.prestador_rubros ?? []).map((pr: any) => pr.rubros).filter(Boolean),
+        // prestador_rubros se deja en el shape crudo del join (mismo que ya
+        // esperaba prestador-profile/[id].tsx) — no lo aplanamos acá.
+        prestador_rubros: prestador?.prestador_rubros ?? [],
+        prestador_profile: {
+          rating: prestador?.rating ?? 0,
+          trabajos_completados: prestador?.trabajos_completados ?? 0,
+          tipo_verificacion: prestador?.tipo_verificacion ?? 'estandar',
+          esta_verificado: prestador?.esta_verificado ?? false,
+          foto_perfil_url: prestador?.foto_perfil_url ?? null,
+        },
         calificaciones: calificaciones ?? [],
       },
     };
@@ -159,15 +167,23 @@ export class ProfilesService {
       ? `POINT(${dto.coordenadas.lon} ${dto.coordenadas.lat})`
       : undefined;
 
+    const { data: existente } = await supabase
+      .from('perfiles_prestadores')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+
     const prestadorData: Record<string, any> = {
       id: userId,
-      radio_km: dto.radio_km,
       franjas_horarias: dto.franjas_horarias,
-      esta_verificado: false,
-      disponible: false,
     };
-    if (dto.zona_nombre) prestadorData.zona_nombre = dto.zona_nombre;
     if (ubicacionBase) prestadorData.ubicacion_base = ubicacionBase;
+    if (!existente) {
+      // Alta inicial: estos campos solo se setean acá. Una edición posterior
+      // (mismo endpoint) no debe revertir la verificación ni la disponibilidad.
+      prestadorData.esta_verificado = false;
+      prestadorData.disponible = false;
+    }
 
     // Upsert del perfil de prestador
     const { data: result, error: upsertError } = await supabase
