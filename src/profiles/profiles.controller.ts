@@ -48,6 +48,12 @@ export class ProfilesController {
     return this.profilesService.getProfile(user.id, accessToken);
   }
 
+  @Get('me/strikes')
+  @ApiOperation({ summary: 'Historial de strikes del usuario autenticado (CAN-02/03/04)' })
+  async getMisStrikes(@CurrentUser() user: User, @AccessToken() accessToken: string) {
+    return this.profilesService.getMisStrikes(user.id, accessToken);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Perfil público de un prestador (para el cliente)' })
   @ApiResponse({ status: 200, description: 'nombre, rating, rubros, trabajos, calificaciones — sin datos sensibles' })

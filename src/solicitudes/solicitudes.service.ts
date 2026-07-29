@@ -1026,6 +1026,20 @@ export class SolicitudesService {
         strikeAplicado = true;
         const row = Array.isArray(strikeData) ? strikeData[0] : strikeData;
         cuentaSuspendida = !!row?.suspendido;
+
+        const esUrgente = solicitud.urgencia !== 'programado';
+        const motivo = esUrgente
+          ? 'Cancelaste un trabajo urgente ya aceptado'
+          : 'Cancelaste un trabajo no urgente más de 12hs después de aceptarlo';
+        const { error: historialError } = await serviceSupabase.from('strikes_historial').insert({
+          perfil_id: userId,
+          trabajo_id: solicitudId,
+          motivo,
+        });
+        if (historialError) {
+          this.logger.error(`Error guardando historial de strike de ${userId}: ${historialError.message}`);
+        }
+
         if (cuentaSuspendida) {
           this.logger.warn(
             `Cuenta ${userId} suspendida tras acumular ${row.strikes_count} strikes por cancelaciones`,

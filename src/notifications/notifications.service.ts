@@ -123,29 +123,48 @@ export class NotificationsService {
     await this.notifyUsers(userIds, payload.title, payload.body, accessToken, payload.data);
   }
 
+  private readonly maxPushAttempts = 3;
+  private readonly pushRetryBaseDelayMs = 500;
+
   private async sendPush(
     messages: Array<{ to: string; title: string; body: string; data?: Record<string, any> }>,
   ) {
     if (!messages.length) return;
 
-    try {
-      const response = await fetch(this.expoEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(messages),
-      });
+    for (let attempt = 1; attempt <= this.maxPushAttempts; attempt++) {
+      try {
+        const response = await fetch(this.expoEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(messages),
+        });
 
-      if (!response.ok) {
-        this.logger.error(`Expo push falló: ${response.status}`);
+        // 4xx (payload inválido) no se resuelve reintentando igual; solo
+        // vale la pena reintentar fallas transitorias (red, 5xx de Expo).
+        if (!response.ok) {
+          if (response.status < 500 || attempt === this.maxPushAttempts) {
+            this.logger.error(`Expo push falló: ${response.status} (intento ${attempt})`);
+            return;
+          }
+          throw new Error(`Expo respondió ${response.status}`);
+        }
+
+        const result = (await response.json()) as {
+          data?: Array<{ status: string; message?: string }>;
+        };
+        result?.data?.forEach((r) => {
+          if (r.status !== 'ok') this.logger.warn(`Expo push no-ok: ${r.message}`);
+        });
         return;
+      } catch (err: any) {
+        if (attempt === this.maxPushAttempts) {
+          this.logger.error(`sendPush error tras ${attempt} intentos: ${err.message}`);
+          return;
+        }
+        const delay = this.pushRetryBaseDelayMs * 2 ** (attempt - 1);
+        this.logger.warn(`sendPush intento ${attempt} falló (${err.message}), reintentando en ${delay}ms`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-
-      const result = (await response.json()) as { data?: Array<{ status: string; message?: string }> };
-      result?.data?.forEach((r) => {
-        if (r.status !== 'ok') this.logger.warn(`Expo push no-ok: ${r.message}`);
-      });
-    } catch (err: any) {
-      this.logger.error(`sendPush error: ${err.message}`);
     }
   }
 

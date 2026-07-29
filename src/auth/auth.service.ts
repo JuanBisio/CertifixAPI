@@ -32,8 +32,13 @@ export class AuthService {
         throw new BadRequestException('User registration failed');
       }
 
-      // Create profile in perfiles table
-      const { error: profileError } = await supabase
+      // Create profile in perfiles table. Usa el service client (no el cliente
+      // recién autenticado por signUp) para no depender de que la sesión ya haya
+      // propagado al momento del insert — necesario además una vez que `perfiles`
+      // tenga RLS habilitado, ya que la policy de INSERT no cubre altas de perfil
+      // ajenas al propio flujo de registro.
+      const { error: profileError } = await this.supabaseService
+        .getServiceClient()
         .from('perfiles')
         .insert({
           id: authData.user.id,

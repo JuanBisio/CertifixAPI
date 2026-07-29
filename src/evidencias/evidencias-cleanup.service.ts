@@ -137,7 +137,15 @@ export class EvidenciasCleanupService {
     );
   }
 
+  // Desde que el bucket pasó a privado, `url_archivo` guarda el path crudo del
+  // storage (ver evidencias.service.ts), no una URL completa. Se mantiene el
+  // parseo de URL como fallback para filas viejas creadas cuando el bucket
+  // todavía era público, con el mismo criterio que getEvidencias().
   private extractStoragePath(url: string): string | null {
+    if (!url.startsWith('http')) {
+      return url;
+    }
+
     try {
       const parsed = new URL(url);
       const marker = '/storage/v1/object/public/';
