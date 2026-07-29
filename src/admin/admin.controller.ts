@@ -63,6 +63,23 @@ export class AdminController {
     return this.adminService.setDisponible(accessToken, id, dto.value);
   }
 
+  @Get('prestadores/:id/documentos')
+  async getDocumentosPrestador(@Param('id') id: string) {
+    return this.adminService.getDocumentosPrestador(id);
+  }
+
+  @Patch('prestadores/:id/reject')
+  async rejectPrestador(@Param('id') id: string, @Req() req: Request) {
+    const accessToken = (req as any).accessToken as string;
+    return this.adminService.rejectPrestador(accessToken, id);
+  }
+
+  @Patch('prestadores/:id/baja')
+  async darDeBajaPrestador(@Param('id') id: string, @Req() req: Request) {
+    const accessToken = (req as any).accessToken as string;
+    return this.adminService.darDeBajaPrestador(accessToken, id);
+  }
+
   @Get('suscripciones')
   async listSuscripciones(@Req() req: Request) {
     const accessToken = (req as any).accessToken as string;

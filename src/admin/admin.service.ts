@@ -1,11 +1,24 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import { ProfilesService } from '../profiles/profiles.service';
+
+// Documentos de identidad: sólo se exponen vía GET /admin/prestadores/:id/documentos
+// (signed URLs, TTL corto) — no en el listado general, para minimizar exposición.
+const SENSITIVE_DOC_COLUMNS = [
+  'dni_frente_url',
+  'dni_dorso_url',
+  'selfie_dni_url',
+  'matricula_url',
+] as const;
 
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
 
-  constructor(private supabaseService: SupabaseService) {}
+  constructor(
+    private supabaseService: SupabaseService,
+    private profilesService: ProfilesService,
+  ) {}
 
   async listPrestadores(accessToken: string, verificado?: boolean) {
     // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
@@ -25,7 +38,15 @@ export class AdminService {
       throw new BadRequestException('Failed to list prestadores');
     }
 
-    return data || [];
+    return (data || []).map((row: Record<string, any>) => {
+      const { ...rest } = row;
+      SENSITIVE_DOC_COLUMNS.forEach((col) => delete rest[col]);
+      return rest;
+    });
+  }
+
+  async getDocumentosPrestador(prestadorId: string) {
+    return this.profilesService.getDocumentosPrestador(prestadorId);
   }
 
   async setVerificado(
@@ -44,6 +65,11 @@ export class AdminService {
     if (value && tipoVerificacion) {
       updateData.tipo_verificacion = tipoVerificacion;
     }
+    // Si se aprueba a un prestador previamente rechazado, limpiar el timestamp
+    // de rechazo — evita dejar un dato inconsistente (rechazado + verificado).
+    if (value) {
+      updateData.verificacion_rechazada_at = null;
+    }
 
     const { data, error } = await supabase
       .from('perfiles_prestadores')
@@ -55,6 +81,62 @@ export class AdminService {
     if (error) {
       this.logger.error(`Failed to update verification: ${error.message}`);
       throw new BadRequestException('Failed to update verification');
+    }
+
+    return data;
+  }
+
+  async rejectPrestador(accessToken: string, prestadorId: string) {
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data: actual } = await supabase
+      .from('perfiles_prestadores')
+      .select('esta_verificado')
+      .eq('id', prestadorId)
+      .single();
+
+    if (actual?.esta_verificado) {
+      throw new BadRequestException(
+        'No se puede rechazar un prestador ya verificado — usar dar de baja',
+      );
+    }
+
+    const { data, error } = await supabase
+      .from('perfiles_prestadores')
+      .update({ esta_verificado: false, verificacion_rechazada_at: new Date().toISOString() })
+      .eq('id', prestadorId)
+      .select('*')
+      .single();
+
+    if (error) {
+      this.logger.error(`Failed to reject prestador: ${error.message}`);
+      throw new BadRequestException('Failed to reject prestador');
+    }
+
+    return data;
+  }
+
+  async darDeBajaPrestador(accessToken: string, prestadorId: string) {
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data, error } = await supabase
+      .from('perfiles_prestadores')
+      .update({ cuenta_baja_at: new Date().toISOString(), disponible: false })
+      .eq('id', prestadorId)
+      .select('*')
+      .single();
+
+    if (error) {
+      this.logger.error(`Failed to dar de baja prestador: ${error.message}`);
+      throw new BadRequestException('Failed to dar de baja prestador');
     }
 
     return data;
