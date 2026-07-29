@@ -440,7 +440,9 @@ export class AdminService {
     const supabase = this.supabaseService.getServiceClient();
     const { data, error } = await supabase
       .from('disputas')
-      .select('*')
+      .select(
+        '*, trabajo:solicitudes_trabajo(id, rubros(id, nombre, icono), cliente:perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre), prestador:perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre))',
+      )
       .order('created_at', { ascending: false });
 
     if (error) {
