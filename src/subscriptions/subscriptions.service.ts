@@ -12,7 +12,7 @@ import {
 
 export const SUBSCRIPTION_AMOUNT = 30000;
 export const TRABAJOS_GRATIS_LIMITE = 3;
-const SUBSCRIPTION_PERIOD_DAYS = 30;
+export const SUBSCRIPTION_PERIOD_DAYS = 30;
 const BACK_URL = 'https://certifix.app';
 // Estados de un preapproval que no admiten reactivación — hay que crear uno nuevo.
 const TERMINAL_STATUSES = ['cancelled'];

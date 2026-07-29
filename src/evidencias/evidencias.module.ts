@@ -6,5 +6,6 @@ import { EvidenciasCleanupService } from './evidencias-cleanup.service';
 @Module({
   controllers: [EvidenciasController],
   providers: [EvidenciasService, EvidenciasCleanupService],
+  exports: [EvidenciasService],
 })
 export class EvidenciasModule {}

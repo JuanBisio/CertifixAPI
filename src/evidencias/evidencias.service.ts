@@ -157,40 +157,7 @@ export class EvidenciasService {
         throw new ForbiddenException('Access denied to this work request');
       }
 
-      // Get evidencias
-      const { data, error } = await supabase
-        .from('evidencias')
-        .select('*')
-        .eq('trabajo_id', trabajoId)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        this.logger.error(`Failed to fetch evidencias: ${error.message}`);
-        throw new BadRequestException('Failed to fetch evidence');
-      }
-
-      const filtered = (data || []).filter(
-        (ev: any) => !ev.expires_at || ev.expires_at > nowIso,
-      );
-
-      // Generar signed URLs frescas (1 hora) para cada evidencia
-      const service = this.supabaseService.getServiceClient();
-      const evidenciasConUrl = await Promise.all(
-        filtered.map(async (ev: any) => {
-          const path = ev.url_archivo || ev.url;
-          if (!path) return ev;
-          // Si el campo contiene una URL completa (datos previos al cambio), extraer el path
-          const storagePath = path.startsWith('http')
-            ? path.split(`/object/public/${this.BUCKET}/`)[1] ?? path.split(`/object/sign/${this.BUCKET}/`)[1]
-            : path;
-          if (!storagePath) return ev;
-          const { data: s } = await service.storage
-            .from(this.BUCKET)
-            .createSignedUrl(storagePath, 60 * 60);
-          const signedUrl = s?.signedUrl ?? path;
-          return { ...ev, url: signedUrl, url_archivo: signedUrl };
-        }),
-      );
+      const evidenciasConUrl = await this.getEvidenciasConUrlsByTrabajo(trabajoId, nowIso);
 
       return { evidencias: evidenciasConUrl };
     } catch (error) {
@@ -203,5 +170,46 @@ export class EvidenciasService {
       this.logger.error(`Find evidencias error: ${error.message}`);
       throw new BadRequestException('Failed to fetch evidence');
     }
+  }
+
+  /**
+   * Devuelve el array de evidencias de un trabajo con signed URLs frescas,
+   * SIN chequeo de pertenencia (cliente/prestador). Reutilizado por findByTrabajo
+   * (tras validar pertenencia) y por AdminService (bypass explícito, admin).
+   */
+  async getEvidenciasConUrlsByTrabajo(trabajoId: string, nowIso: string = new Date().toISOString()) {
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data, error } = await supabase
+      .from('evidencias')
+      .select('*')
+      .eq('trabajo_id', trabajoId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      this.logger.error(`Failed to fetch evidencias: ${error.message}`);
+      throw new BadRequestException('Failed to fetch evidence');
+    }
+
+    const filtered = (data || []).filter(
+      (ev: any) => !ev.expires_at || ev.expires_at > nowIso,
+    );
+
+    return Promise.all(
+      filtered.map(async (ev: any) => {
+        const path = ev.url_archivo || ev.url;
+        if (!path) return ev;
+        // Si el campo contiene una URL completa (datos previos al cambio), extraer el path
+        const storagePath = path.startsWith('http')
+          ? path.split(`/object/public/${this.BUCKET}/`)[1] ?? path.split(`/object/sign/${this.BUCKET}/`)[1]
+          : path;
+        if (!storagePath) return ev;
+        const { data: s } = await supabase.storage
+          .from(this.BUCKET)
+          .createSignedUrl(storagePath, 60 * 60);
+        const signedUrl = s?.signedUrl ?? path;
+        return { ...ev, url: signedUrl, url_archivo: signedUrl };
+      }),
+    );
   }
 }
