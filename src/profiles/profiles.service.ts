@@ -320,11 +320,17 @@ export class ProfilesService {
 
     const bucket = BUCKET_MAP[tipo];
     const column = COLUMN_MAP[tipo];
+    // fileName ya incluye Date.now(), nunca colisiona con un objeto existente
+    // — upsert:true no hace falta y rompe bajo RLS: Storage necesita poder
+    // leer (SELECT) el objeto para decidir insert vs. update, pero estos
+    // buckets no le dan SELECT a `authenticated` a propósito (solo signed
+    // URLs server-side), así que el upsert siempre fallaba con
+    // "new row violates row-level security policy" aun en un path nuevo.
     const fileName = `${userId}/${tipo}_${Date.now()}_${file.originalname}`;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
+      .upload(fileName, file.buffer, { contentType: file.mimetype });
 
     if (uploadError) {
       this.logger.error(`Upload ${tipo} falló: ${uploadError.message}`);
