@@ -52,11 +52,13 @@ export class CreateSolicitudDto {
 
   @ApiPropertyOptional({
     enum: FranjaHoraria,
-    description: 'Requerido si urgencia = programado',
+    isArray: true,
+    description: 'Una o más franjas preferidas (requerido si urgencia = programado)',
   })
   @IsOptional()
-  @IsEnum(FranjaHoraria)
-  franja_horaria?: FranjaHoraria;
+  @IsArray()
+  @IsEnum(FranjaHoraria, { each: true })
+  franjas_horarias?: FranjaHoraria[];
 
   @ApiPropertyOptional({
     example: '2026-05-10',

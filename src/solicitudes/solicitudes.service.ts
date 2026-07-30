@@ -83,7 +83,7 @@ export class SolicitudesService {
         fotos_urls: dto.fotos_urls ?? [],
         tipo_tecnico: dto.tipo_tecnico,
         urgencia: dto.urgencia,
-        franja_horaria: dto.franja_horaria ?? null,
+        franjas_horarias: dto.franjas_horarias ?? null,
         fecha_preferida: dto.fecha_preferida ?? null,
         direccion_exacta: dto.direccion_exacta,
         zona_nombre: dto.zona_nombre,
@@ -476,7 +476,12 @@ export class SolicitudesService {
 
   // ─── POSTULARSE (prestador, solo modo programado) ────────────────────────
 
-  async postularse(solicitudId: string, prestadorId: string, accessToken: string) {
+  async postularse(
+    solicitudId: string,
+    prestadorId: string,
+    accessToken: string,
+    presupuesto?: number,
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
     const { data: profile } = await supabase
@@ -532,6 +537,7 @@ export class SolicitudesService {
     const { data: candidato, error } = await supabase.rpc('postularse_a_solicitud', {
       p_solicitud_id: solicitudId,
       p_prestador_id: prestadorId,
+      p_presupuesto: presupuesto ?? null,
     });
 
     if (error) {

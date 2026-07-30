@@ -390,6 +390,32 @@ export class ProfilesService {
     return data.signedUrl;
   }
 
+  // Filas creadas antes de que uploadDocumento() empezara a guardar el path
+  // crudo pueden tener la URL pública completa (flujo viejo con
+  // getPublicUrl()) — sin este fallback, createSignedUrl() recibe una URL en
+  // vez de un path, falla en silencio, y el admin muestra el documento como
+  // "no subido" pese a existir. Mismo criterio que
+  // EvidenciasCleanupService/DocumentosVerificacionCleanupService.extractStoragePath.
+  private extractStoragePath(value: string | null, bucket: string): string | null {
+    if (!value) return null;
+    if (!value.startsWith('http')) return value;
+
+    try {
+      const parsed = new URL(value);
+      const marker = '/storage/v1/object/public/';
+      const markerIndex = parsed.pathname.indexOf(marker);
+      if (markerIndex === -1) return null;
+
+      const path = parsed.pathname.substring(markerIndex + marker.length);
+      const bucketPrefix = `${bucket}/`;
+      const cleaned = path.startsWith(bucketPrefix) ? path.substring(bucketPrefix.length) : path;
+      return decodeURIComponent(cleaned);
+    } catch {
+      this.logger.warn(`Failed to extract storage path from url: ${value}`);
+      return null;
+    }
+  }
+
   async getDocumentosPrestador(prestadorId: string) {
     const supabase = this.supabaseService.getServiceClient();
     const { data: prestador, error } = await supabase
@@ -403,19 +429,16 @@ export class ProfilesService {
     if (error || !prestador) throw new NotFoundException('Prestador no encontrado');
 
     const bucket = DOCUMENTOS_PRESTADORES_BUCKET;
+    const dniFrentePath = this.extractStoragePath(prestador.dni_frente_url, bucket);
+    const dniDorsoPath = this.extractStoragePath(prestador.dni_dorso_url, bucket);
+    const selfiePath = this.extractStoragePath(prestador.selfie_dni_url, bucket);
+    const matriculaPath = this.extractStoragePath(prestador.matricula_url, bucket);
+
     const [dniFrente, dniDorso, selfie, matricula] = await Promise.all([
-      prestador.dni_frente_url
-        ? this.getSignedUrlForDocumento(bucket, prestador.dni_frente_url)
-        : Promise.resolve(null),
-      prestador.dni_dorso_url
-        ? this.getSignedUrlForDocumento(bucket, prestador.dni_dorso_url)
-        : Promise.resolve(null),
-      prestador.selfie_dni_url
-        ? this.getSignedUrlForDocumento(bucket, prestador.selfie_dni_url)
-        : Promise.resolve(null),
-      prestador.matricula_url
-        ? this.getSignedUrlForDocumento(bucket, prestador.matricula_url)
-        : Promise.resolve(null),
+      dniFrentePath ? this.getSignedUrlForDocumento(bucket, dniFrentePath) : Promise.resolve(null),
+      dniDorsoPath ? this.getSignedUrlForDocumento(bucket, dniDorsoPath) : Promise.resolve(null),
+      selfiePath ? this.getSignedUrlForDocumento(bucket, selfiePath) : Promise.resolve(null),
+      matriculaPath ? this.getSignedUrlForDocumento(bucket, matriculaPath) : Promise.resolve(null),
     ]);
 
     return {

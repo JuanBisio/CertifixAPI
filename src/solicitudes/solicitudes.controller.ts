@@ -16,6 +16,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody
 import { SolicitudesService } from './solicitudes.service';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { PostularseDto } from './dto/postularse.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser, AccessToken } from '../common/decorators/current-user.decorator';
 import type { User } from '@supabase/supabase-js';
@@ -145,9 +146,10 @@ export class SolicitudesController {
     @Param('id') id: string,
     @CurrentUser() user: User,
     @AccessToken() accessToken: string,
+    @Body() dto: PostularseDto,
   ) {
     this.logger.log(`Postularse a solicitud ${id} - prestador: ${user.id}`);
-    return this.solicitudesService.postularse(id, user.id, accessToken);
+    return this.solicitudesService.postularse(id, user.id, accessToken, dto.presupuesto);
   }
 
   @Get(':id/candidatos')
