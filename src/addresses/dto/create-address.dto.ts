@@ -1,4 +1,11 @@
-import { IsBoolean, IsLatitude, IsLongitude, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsLatitude,
+  IsLongitude,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateAddressDto {
@@ -23,7 +30,9 @@ export class CreateAddressDto {
   @IsLongitude()
   lon: number;
 
-  @ApiPropertyOptional({ description: 'Google Place ID, si vino de autocompletado' })
+  @ApiPropertyOptional({
+    description: 'Google Place ID, si vino de autocompletado',
+  })
   @IsOptional()
   @IsString()
   place_id?: string;

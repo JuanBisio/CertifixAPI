@@ -1,4 +1,10 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { EvidenciasService } from '../evidencias/evidencias.service';
@@ -10,7 +16,15 @@ import {
   SUBSCRIPTION_PERIOD_DAYS,
 } from '../subscriptions/subscriptions.service';
 
-const ESTADOS_SOLICITUD = ['buscando', 'aceptado', 'en_camino', 'en_trabajo', 'finalizado', 'cerrado', 'cancelado'] as const;
+const ESTADOS_SOLICITUD = [
+  'buscando',
+  'aceptado',
+  'en_camino',
+  'en_trabajo',
+  'finalizado',
+  'cerrado',
+  'cancelado',
+] as const;
 
 // Documentos de identidad: sólo se exponen vía GET /admin/prestadores/:id/documentos
 // (signed URLs, TTL corto) — no en el listado general, para minimizar exposición.
@@ -19,6 +33,7 @@ const SENSITIVE_DOC_COLUMNS = [
   'dni_dorso_url',
   'selfie_dni_url',
   'matricula_url',
+  'rc_poliza_url',
 ] as const;
 
 @Injectable()
@@ -35,11 +50,25 @@ export class AdminService {
   async getMetrics() {
     const supabase = this.supabaseService.getServiceClient();
     const now = new Date();
-    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-    const startOfNextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
-    const hace30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const startOfMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    ).toISOString();
+    const startOfNextMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+    ).toISOString();
+    const hace30d = new Date(
+      now.getTime() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
 
-    const [trabajosPorEstado, prestadores, pagosDelMes, cancelados30d, total30d, disputasAbiertas] = await Promise.all([
+    const [
+      trabajosPorEstado,
+      prestadores,
+      pagosDelMes,
+      cancelados30d,
+      total30d,
+      disputasAbiertas,
+      revocacionesPendientes,
+    ] = await Promise.all([
       Promise.all(
         ESTADOS_SOLICITUD.map(async (estado) => ({
           estado,
@@ -54,7 +83,9 @@ export class AdminService {
       ),
       supabase
         .from('perfiles_prestadores')
-        .select('esta_verificado, verificacion_rechazada_at, cuenta_baja_at, suscripcion_activa, suscripcion_vence_at, trabajos_gratis_usados'),
+        .select(
+          'esta_verificado, verificacion_rechazada_at, cuenta_baja_at, suscripcion_activa, suscripcion_vence_at, trabajos_gratis_usados',
+        ),
       supabase
         .from('suscripcion_pagos')
         .select('amount')
@@ -66,13 +97,33 @@ export class AdminService {
         .select('id', { count: 'exact', head: true })
         .eq('estado', 'cancelado')
         .gte('created_at', hace30d),
-      supabase.from('solicitudes_trabajo').select('id', { count: 'exact', head: true }).gte('created_at', hace30d),
-      supabase.from('disputas').select('id', { count: 'exact', head: true }).eq('estado', 'abierta'),
+      supabase
+        .from('solicitudes_trabajo')
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', hace30d),
+      supabase
+        .from('disputas')
+        .select('id', { count: 'exact', head: true })
+        .eq('estado', 'abierta'),
+      supabase
+        .from('solicitudes_revocacion')
+        .select('id', { count: 'exact', head: true })
+        .eq('procesado', false),
     ]);
 
     const prestadoresRows = prestadores.data ?? [];
-    const prestadoresPorVerificacion = { pendiente: 0, verificado: 0, rechazado: 0, baja: 0 };
-    const suscripciones = { activa: 0, proxima_a_vencer: 0, vencida: 0, promo_gratis: 0 };
+    const prestadoresPorVerificacion = {
+      pendiente: 0,
+      verificado: 0,
+      rechazado: 0,
+      baja: 0,
+    };
+    const suscripciones = {
+      activa: 0,
+      proxima_a_vencer: 0,
+      vencida: 0,
+      promo_gratis: 0,
+    };
 
     for (const row of prestadoresRows as any[]) {
       if (row.cuenta_baja_at) {
@@ -85,20 +136,27 @@ export class AdminService {
         prestadoresPorVerificacion.pendiente += 1;
       }
 
-      const trabajosGratisRestantes = Math.max(TRABAJOS_GRATIS_LIMITE - (row.trabajos_gratis_usados ?? 0), 0);
+      const trabajosGratisRestantes = Math.max(
+        TRABAJOS_GRATIS_LIMITE - (row.trabajos_gratis_usados ?? 0),
+        0,
+      );
       if (!row.suscripcion_activa) {
         if (trabajosGratisRestantes > 0) suscripciones.promo_gratis += 1;
         else suscripciones.vencida += 1;
       } else {
         const diasRestantes = row.suscripcion_vence_at
-          ? (new Date(row.suscripcion_vence_at).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+          ? (new Date(row.suscripcion_vence_at).getTime() - now.getTime()) /
+            (1000 * 60 * 60 * 24)
           : Infinity;
         if (diasRestantes <= 3) suscripciones.proxima_a_vencer += 1;
         else suscripciones.activa += 1;
       }
     }
 
-    const ingresosMesActual = (pagosDelMes.data ?? []).reduce((sum: number, p: any) => sum + (p.amount ?? 0), 0);
+    const ingresosMesActual = (pagosDelMes.data ?? []).reduce(
+      (sum: number, p: any) => sum + (p.amount ?? 0),
+      0,
+    );
 
     return {
       trabajos_por_estado: trabajosPorEstado,
@@ -106,10 +164,13 @@ export class AdminService {
       suscripciones,
       ingresos_mes_actual: ingresosMesActual,
       tasa_cancelacion: {
-        tasa: total30d.count ? ((cancelados30d.count ?? 0) / total30d.count) * 100 : 0,
+        tasa: total30d.count
+          ? ((cancelados30d.count ?? 0) / total30d.count) * 100
+          : 0,
         muestra: total30d.count ?? 0,
       },
       disputas_abiertas: disputasAbiertas.count ?? 0,
+      revocaciones_pendientes: revocacionesPendientes.count ?? 0,
     };
   }
 
@@ -119,7 +180,9 @@ export class AdminService {
     // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
     // no en una columna de la base).
     const supabase = this.supabaseService.getServiceClient();
-    let query = supabase.from('perfiles_prestadores').select('*, perfiles(nombre)');
+    let query = supabase
+      .from('perfiles_prestadores')
+      .select('*, perfiles(nombre)');
 
     if (typeof verificado === 'boolean') {
       query = query.eq('esta_verificado', verificado);
@@ -144,16 +207,41 @@ export class AdminService {
 
   async getHistorialPrestador(prestadorId: string) {
     const supabase = this.supabaseService.getServiceClient();
-    const [{ data: perfil }, { data: pp }, { data: strikes }, { data: calificaciones }] = await Promise.all([
-      supabase.from('perfiles').select('strikes_count, suspendido').eq('id', prestadorId).single(),
-      supabase.from('perfiles_prestadores').select('rating, trabajos_completados').eq('id', prestadorId).single(),
-      supabase.from('strikes_historial').select('*').eq('perfil_id', prestadorId).order('created_at', { ascending: false }),
-      supabase.from('calificaciones').select('*').eq('prestador_id', prestadorId).order('created_at', { ascending: false }),
+    const [
+      { data: perfil },
+      { data: pp },
+      { data: strikes },
+      { data: calificaciones },
+    ] = await Promise.all([
+      supabase
+        .from('perfiles')
+        .select('strikes_count, suspendido')
+        .eq('id', prestadorId)
+        .single(),
+      supabase
+        .from('perfiles_prestadores')
+        .select('rating, trabajos_completados')
+        .eq('id', prestadorId)
+        .single(),
+      supabase
+        .from('strikes_historial')
+        .select('*')
+        .eq('perfil_id', prestadorId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('calificaciones')
+        .select('*')
+        .eq('prestador_id', prestadorId)
+        .order('created_at', { ascending: false }),
     ]);
 
     const avg = (key: string) => {
-      const vals = (calificaciones ?? []).map((c: any) => c[key]).filter((v: any) => v != null);
-      return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null;
+      const vals = (calificaciones ?? [])
+        .map((c: any) => c[key])
+        .filter((v: any) => v != null);
+      return vals.length
+        ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length
+        : null;
     };
 
     return {
@@ -194,6 +282,10 @@ export class AdminService {
     // de rechazo — evita dejar un dato inconsistente (rechazado + verificado).
     if (value) {
       updateData.verificacion_rechazada_at = null;
+      // "Resultado exitoso" del cotejo biométrico (Política de Privacidad
+      // 4.3) — arranca acá el conteo de 48hs para borrar la selfie, no al
+      // subirla, porque la revisión es manual y puede tardar más que eso.
+      updateData.biometric_capture_at = new Date().toISOString();
     }
 
     const { data, error } = await supabase
@@ -232,7 +324,14 @@ export class AdminService {
 
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .update({ esta_verificado: false, verificacion_rechazada_at: new Date().toISOString() })
+      .update({
+        esta_verificado: false,
+        // "Resultado fallido" del cotejo biométrico (Política de Privacidad
+        // 4.3) — mismo criterio que en setVerificado(): el conteo de 48hs
+        // arranca con la decisión del admin, no con la subida de la selfie.
+        verificacion_rechazada_at: new Date().toISOString(),
+        biometric_capture_at: new Date().toISOString(),
+      })
       .eq('id', prestadorId)
       .select('*')
       .single();
@@ -245,7 +344,10 @@ export class AdminService {
     return data;
   }
 
-  async darDeBajaPrestador(prestadorId: string, confirmarConTrabajoActivo: boolean) {
+  async darDeBajaPrestador(
+    prestadorId: string,
+    confirmarConTrabajoActivo: boolean,
+  ) {
     // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
     // service_role a propósito para no depender de que las policies RLS
     // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
@@ -255,7 +357,9 @@ export class AdminService {
     if (!confirmarConTrabajoActivo) {
       const { data: trabajoActivo } = await supabase
         .from('solicitudes_trabajo')
-        .select('id, estado, created_at, cliente:perfiles!solicitudes_trabajo_cliente_id_fkey(nombre)')
+        .select(
+          'id, estado, created_at, cliente:perfiles!solicitudes_trabajo_cliente_id_fkey(nombre)',
+        )
         .eq('prestador_id', prestadorId)
         .in('estado', ['aceptado', 'en_camino', 'en_trabajo'])
         .order('created_at', { ascending: false })
@@ -285,7 +389,9 @@ export class AdminService {
         // No bloquear la baja por una falla de MercadoPago: priorizar sacar al
         // prestador de circulación. El admin ve mp_cancelacion_ok=false y cancela
         // manualmente en el dashboard de MP si hace falta.
-        this.logger.error(`No se pudo cancelar la suscripción MP al dar de baja: ${err.message}`);
+        this.logger.error(
+          `No se pudo cancelar la suscripción MP al dar de baja: ${err.message}`,
+        );
       }
     }
 
@@ -309,7 +415,32 @@ export class AdminService {
     return { ...data, mp_cancelacion_ok: suscripcionCancelada };
   }
 
-  async setDisponible(accessToken: string, prestadorId: string, value: boolean) {
+  async setRcVerificado(prestadorId: string, value: boolean) {
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
+    const { data, error } = await supabase
+      .from('perfiles_prestadores')
+      .update({ rc_verificado: value })
+      .eq('id', prestadorId)
+      .select('*')
+      .single();
+
+    if (error) {
+      this.logger.error(`Failed to update rc_verificado: ${error.message}`);
+      throw new BadRequestException('Failed to update rc_verificado');
+    }
+
+    return data;
+  }
+
+  async setDisponible(
+    accessToken: string,
+    prestadorId: string,
+    value: boolean,
+  ) {
     // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
     // service_role a propósito para no depender de que las policies RLS
     // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
@@ -338,7 +469,9 @@ export class AdminService {
     const supabase = this.supabaseService.getServiceClient();
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .select('id, suscripcion_activa, suscripcion_vence_at, esta_verificado, disponible, trabajos_gratis_usados, perfiles(nombre)')
+      .select(
+        'id, suscripcion_activa, suscripcion_vence_at, esta_verificado, disponible, trabajos_gratis_usados, perfiles(nombre)',
+      )
       .order('suscripcion_vence_at', { ascending: true });
 
     if (error) {
@@ -370,14 +503,18 @@ export class AdminService {
     // Si ya venció, extender desde hoy; si sigue vigente, sumar sobre el vencimiento actual
     // (no perder el resto del período ya vigente).
     const base =
-      prestador.suscripcion_vence_at && new Date(prestador.suscripcion_vence_at) > new Date()
+      prestador.suscripcion_vence_at &&
+      new Date(prestador.suscripcion_vence_at) > new Date()
         ? new Date(prestador.suscripcion_vence_at)
         : new Date();
     const nuevaFecha = new Date(base.getTime() + dias * 24 * 60 * 60 * 1000);
 
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .update({ suscripcion_vence_at: nuevaFecha.toISOString(), suscripcion_activa: true })
+      .update({
+        suscripcion_vence_at: nuevaFecha.toISOString(),
+        suscripcion_activa: true,
+      })
       .eq('id', prestadorId)
       .select('*')
       .single();
@@ -399,34 +536,47 @@ export class AdminService {
     const monto = dto.monto ?? SUBSCRIPTION_AMOUNT;
     const dias = dto.dias ?? SUBSCRIPTION_PERIOD_DAYS;
     const periodStart = new Date();
-    const periodEnd = new Date(periodStart.getTime() + dias * 24 * 60 * 60 * 1000);
+    const periodEnd = new Date(
+      periodStart.getTime() + dias * 24 * 60 * 60 * 1000,
+    );
 
-    const { error: payError } = await supabase.from('suscripcion_pagos').insert({
-      prestador_id: prestadorId,
-      amount: monto,
-      status: 'completed',
-      payment_method: dto.metodo,
-      period_start: periodStart.toISOString(),
-      period_end: periodEnd.toISOString(),
-      registrado_por_admin_email: adminEmail ?? null,
-      nota_admin: dto.nota ?? null,
-    });
+    const { error: payError } = await supabase
+      .from('suscripcion_pagos')
+      .insert({
+        prestador_id: prestadorId,
+        amount: monto,
+        status: 'completed',
+        payment_method: dto.metodo,
+        period_start: periodStart.toISOString(),
+        period_end: periodEnd.toISOString(),
+        registrado_por_admin_email: adminEmail ?? null,
+        nota_admin: dto.nota ?? null,
+      });
 
     if (payError) {
-      this.logger.error(`Failed to registrar pago offline: ${payError.message}`);
+      this.logger.error(
+        `Failed to registrar pago offline: ${payError.message}`,
+      );
       throw new BadRequestException('No se pudo registrar el pago');
     }
 
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .update({ suscripcion_activa: true, suscripcion_vence_at: periodEnd.toISOString() })
+      .update({
+        suscripcion_activa: true,
+        suscripcion_vence_at: periodEnd.toISOString(),
+      })
       .eq('id', prestadorId)
       .select('*')
       .single();
 
     if (error) {
-      this.logger.error(`Failed to activar suscripcion tras pago offline: ${error.message}`);
-      throw new BadRequestException('Pago registrado pero no se pudo activar la suscripción');
+      this.logger.error(
+        `Failed to activar suscripcion tras pago offline: ${error.message}`,
+      );
+      throw new BadRequestException(
+        'Pago registrado pero no se pudo activar la suscripción',
+      );
     }
 
     return data;
@@ -492,14 +642,20 @@ export class AdminService {
     // no en una columna de la base).
     const supabase = this.supabaseService.getServiceClient();
 
-    const newEstado = resolution === 'a_favor_cliente'
-      ? 'resuelta_a_favor_cliente'
-      : 'resuelta_a_favor_prestador';
+    const newEstado =
+      resolution === 'a_favor_cliente'
+        ? 'resuelta_a_favor_cliente'
+        : 'resuelta_a_favor_prestador';
     const nowIso = new Date().toISOString();
 
     const { data, error } = await supabase
       .from('disputas')
-      .update({ estado: newEstado, nota_resolucion: nota, resolved_at: nowIso, updated_at: nowIso })
+      .update({
+        estado: newEstado,
+        nota_resolucion: nota,
+        resolved_at: nowIso,
+        updated_at: nowIso,
+      })
       .eq('id', disputaId)
       .select('*')
       .single();
@@ -529,6 +685,82 @@ export class AdminService {
     if (error) {
       this.logger.error(`Failed to reopen disputa: ${error.message}`);
       throw new BadRequestException('Failed to reopen disputa');
+    }
+
+    return data;
+  }
+
+  async listRevocaciones(accessToken: string) {
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
+    const { data, error } = await supabase
+      .from('solicitudes_revocacion')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      this.logger.error(
+        `Failed to list solicitudes de revocación: ${error.message}`,
+      );
+      throw new BadRequestException('Failed to list solicitudes de revocación');
+    }
+
+    return data || [];
+  }
+
+  async getRevocacionDetail(revocacionId: string) {
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data, error } = await supabase
+      .from('solicitudes_revocacion')
+      .select('*')
+      .eq('id', revocacionId)
+      .single();
+
+    if (error || !data) {
+      throw new NotFoundException('Solicitud de revocación no encontrada');
+    }
+
+    return data;
+  }
+
+  async procesarRevocacion(
+    revocacionId: string,
+    notaAdmin: string,
+    adminEmail?: string,
+  ) {
+    // AdminGuard ya verificó en TypeScript que el caller es admin — usamos
+    // service_role a propósito para no depender de que las policies RLS
+    // repliquen ese mismo chequeo (hoy vive en app_metadata/allowlist de env,
+    // no en una columna de la base).
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data, error } = await supabase
+      .from('solicitudes_revocacion')
+      .update({
+        procesado: true,
+        procesado_at: new Date().toISOString(),
+        procesado_por_admin_email: adminEmail ?? null,
+        nota_admin: notaAdmin,
+      })
+      .eq('id', revocacionId)
+      .select('*')
+      .single();
+
+    if (error) {
+      this.logger.error(
+        `Failed to procesar solicitud de revocación: ${error.message}`,
+      );
+      throw new BadRequestException(
+        'Failed to procesar solicitud de revocación',
+      );
     }
 
     return data;
@@ -588,7 +820,8 @@ export class AdminService {
       .eq('solicitud_id', id)
       .order('created_at', { ascending: true });
 
-    const evidencias = await this.evidenciasService.getEvidenciasConUrlsByTrabajo(id);
+    const evidencias =
+      await this.evidenciasService.getEvidenciasConUrlsByTrabajo(id);
 
     return { solicitud, mensajes: mensajes ?? [], evidencias };
   }

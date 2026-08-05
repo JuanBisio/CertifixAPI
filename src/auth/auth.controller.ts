@@ -1,11 +1,19 @@
 import { Controller, Post, Get, Body, UseGuards, Logger } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
-import { CurrentUser, AccessToken } from '../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AccessToken,
+} from '../common/decorators/current-user.decorator';
 import type { User } from '@supabase/supabase-js';
 
 @ApiTags('Authentication')
@@ -50,7 +58,10 @@ export class AuthController {
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user profile' })
-  @ApiResponse({ status: 200, description: 'User profile retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'User profile retrieved successfully',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getCurrentUser(
     @CurrentUser() user: User,
@@ -58,5 +69,25 @@ export class AuthController {
   ) {
     this.logger.log(`Get current user request: ${user.id}`);
     return this.authService.getCurrentUser(user.id, accessToken);
+  }
+
+  @Post('account/delete-request')
+  @UseGuards(SupabaseAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Solicitar eliminación real de la cuenta (irreversible) — bloquea el login y programa la supresión de datos a los 30 días',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Solicitud de eliminación registrada',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async requestAccountDeletion(
+    @CurrentUser() user: User,
+    @AccessToken() accessToken: string,
+  ) {
+    this.logger.log(`Account deletion requested: ${user.id}`);
+    return this.authService.requestAccountDeletion(user.id, accessToken);
   }
 }

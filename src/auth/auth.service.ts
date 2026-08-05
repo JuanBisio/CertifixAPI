@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -50,17 +55,22 @@ export class AuthService {
       if (profileError) {
         this.logger.error(`Profile creation failed: ${profileError.message}`);
         // Note: User is created in auth but profile failed - this is a partial failure
-        throw new BadRequestException('Profile creation failed: ' + profileError.message);
+        throw new BadRequestException(
+          'Profile creation failed: ' + profileError.message,
+        );
       }
 
       // Ensure we return a session/access_token (some Supabase projects may not return session on signUp)
-      const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
-        email: registerDto.email,
-        password: registerDto.password,
-      });
+      const { data: loginData, error: loginError } =
+        await supabase.auth.signInWithPassword({
+          email: registerDto.email,
+          password: registerDto.password,
+        });
 
       if (loginError) {
-        this.logger.error(`Auto-login after register failed: ${loginError.message}`);
+        this.logger.error(
+          `Auto-login after register failed: ${loginError.message}`,
+        );
         // If email confirmation is required, return a hint to the client
         if (loginError.message.toLowerCase().includes('email not confirmed')) {
           return {
@@ -113,6 +123,26 @@ export class AuthService {
         throw new UnauthorizedException('Login failed');
       }
 
+      // Cuenta con eliminación solicitada (ver requestAccountDeletion): el
+      // login queda bloqueado desde ese momento, no hay marcha atrás — se
+      // invalida la sesión recién emitida antes de devolver el error.
+      const { data: perfil } = await this.supabaseService
+        .getServiceClient()
+        .from('perfiles')
+        .select('eliminacion_solicitada_at')
+        .eq('id', data.user.id)
+        .single();
+
+      if (perfil?.eliminacion_solicitada_at) {
+        await supabase.auth.signOut();
+        this.logger.warn(
+          `Login bloqueado, cuenta pendiente de eliminación: ${data.user.id}`,
+        );
+        throw new UnauthorizedException(
+          'Esta cuenta fue dada de baja y está pendiente de eliminación',
+        );
+      }
+
       this.logger.log(`User logged in: ${data.user.id}`);
 
       return {
@@ -158,7 +188,8 @@ export class AuthService {
 
     try {
       // Get user auth data using provided token
-      const { data: authData, error: authError } = await supabase.auth.getUser(accessToken);
+      const { data: authData, error: authError } =
+        await supabase.auth.getUser(accessToken);
       if (authError) {
         this.logger.error(`Failed to fetch auth user: ${authError.message}`);
         throw new BadRequestException('Failed to fetch user data');
@@ -177,16 +208,19 @@ export class AuthService {
       }
 
       // Get prestador profile if exists
-      const { data: prestadorProfile, error: prestadorError } = await serviceSupabase
-        .from('perfiles_prestadores')
-        .select('*')
-        .eq('id', userId)
-        .single();
+      const { data: prestadorProfile, error: prestadorError } =
+        await serviceSupabase
+          .from('perfiles_prestadores')
+          .select('*')
+          .eq('id', userId)
+          .single();
 
       if (prestadorError) {
-        this.logger.warn(`Prestador profile fetch error: ${prestadorError.message}`);
+        this.logger.warn(
+          `Prestador profile fetch error: ${prestadorError.message}`,
+        );
       }
-     this.logger.log(
+      this.logger.log(
         `getCurrentUser ${userId} rol=${profile.rol} prestador_profile=${prestadorProfile ? 'found' : 'none'}`,
       );
 
@@ -198,7 +232,8 @@ export class AuthService {
         rol: profile.rol,
         strikes_count: profile.strikes_count,
         suspendido: profile.suspendido,
-        prestador_profile: this.profilesService.mapPrestadorProfile(prestadorProfile),
+        prestador_profile:
+          this.profilesService.mapPrestadorProfile(prestadorProfile),
       };
     } catch (error) {
       if (error instanceof BadRequestException) {
@@ -207,5 +242,67 @@ export class AuthService {
       this.logger.error(`Get current user error: ${error.message}`);
       throw new BadRequestException('Failed to fetch user data');
     }
+  }
+
+  // Cumplimiento de privacidad V1 (T&C 2.6 / Política 14.2): eliminación
+  // real de cuenta, autoservicio. Solo marca la solicitud y bloquea el
+  // acceso — la supresión efectiva de datos corre a los 30 días vía
+  // AccountDeletionCleanupService (src/profiles/account-deletion-cleanup.service.ts).
+  async requestAccountDeletion(userId: string, accessToken: string) {
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data: perfil, error: fetchError } = await supabase
+      .from('perfiles')
+      .select('eliminacion_solicitada_at')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError) {
+      this.logger.error(
+        `Failed to fetch perfil for account deletion: ${fetchError.message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo procesar la solicitud de eliminación',
+      );
+    }
+
+    if (perfil?.eliminacion_solicitada_at) {
+      throw new BadRequestException(
+        'La eliminación de esta cuenta ya fue solicitada',
+      );
+    }
+
+    const { error: updateError } = await supabase
+      .from('perfiles')
+      .update({ eliminacion_solicitada_at: new Date().toISOString() })
+      .eq('id', userId);
+
+    if (updateError) {
+      this.logger.error(
+        `Failed to mark account for deletion: ${updateError.message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo procesar la solicitud de eliminación',
+      );
+    }
+
+    // Invalida todas las sesiones activas (todos los dispositivos), no solo
+    // la que hizo este request — requiere el admin client (service role).
+    const { error: signOutError } = await supabase.auth.admin.signOut(
+      accessToken,
+      'global',
+    );
+    if (signOutError) {
+      this.logger.warn(
+        `Failed to revoke sessions on account deletion: ${signOutError.message}`,
+      );
+    }
+
+    this.logger.log(`Account deletion requested, sessions revoked: ${userId}`);
+
+    return {
+      message:
+        'Tu cuenta va a ser eliminada. Tus datos personales se van a suprimir dentro de los próximos 30 días.',
+    };
   }
 }

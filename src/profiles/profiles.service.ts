@@ -9,39 +9,58 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreatePrestadorDto } from './dto/create-prestador.dto';
 import { UpdateDisponibilidadDto } from './dto/update-disponibilidad.dto';
+import { UpdateRcSeguroDto } from './dto/update-rc-seguro.dto';
 
-type DocumentoTipo = 'dni_frente' | 'dni_dorso' | 'selfie_dni' | 'matricula' | 'foto_perfil';
+// Exportados para reuso en AccountDeletionCleanupService (borra los mismos
+// documentos/foto de storage al purgar una cuenta dada de baja).
+export type DocumentoTipo =
+  | 'dni_frente'
+  | 'dni_dorso'
+  | 'selfie_dni'
+  | 'matricula'
+  | 'foto_perfil'
+  | 'rc_poliza';
 
-const DOCUMENTOS_PRESTADORES_BUCKET =
+export const DOCUMENTOS_PRESTADORES_BUCKET =
   process.env.DOCUMENTOS_PRESTADORES_BUCKET || 'documentos-prestadores';
-const FOTOS_PERFIL_BUCKET = process.env.FOTOS_PERFIL_BUCKET || 'fotos-perfil';
+export const FOTOS_PERFIL_BUCKET =
+  process.env.FOTOS_PERFIL_BUCKET || 'fotos-perfil';
 
-const BUCKET_MAP: Record<DocumentoTipo, string> = {
+export const BUCKET_MAP: Record<DocumentoTipo, string> = {
   dni_frente: DOCUMENTOS_PRESTADORES_BUCKET,
   dni_dorso: DOCUMENTOS_PRESTADORES_BUCKET,
   selfie_dni: DOCUMENTOS_PRESTADORES_BUCKET,
   matricula: DOCUMENTOS_PRESTADORES_BUCKET,
   foto_perfil: FOTOS_PERFIL_BUCKET,
+  rc_poliza: DOCUMENTOS_PRESTADORES_BUCKET,
 };
 
-const COLUMN_MAP: Record<DocumentoTipo, string> = {
+export const COLUMN_MAP: Record<DocumentoTipo, string> = {
   dni_frente: 'dni_frente_url',
   dni_dorso: 'dni_dorso_url',
   selfie_dni: 'selfie_dni_url',
   matricula: 'matricula_url',
   foto_perfil: 'foto_perfil_url',
+  rc_poliza: 'rc_poliza_url',
 };
 
-// dni_frente/dni_dorso/selfie_dni/matricula viven en el bucket PRIVADO
-// documentos-prestadores: se guarda el path crudo en la columna y las URLs
-// se firman on-demand (server-side, con el service client). foto_perfil
-// vive en el bucket público fotos-perfil y sigue usando getPublicUrl().
+// dni_frente/dni_dorso/selfie_dni/matricula/rc_poliza viven en el bucket
+// PRIVADO documentos-prestadores: se guarda el path crudo en la columna y
+// las URLs se firman on-demand (server-side, con el service client).
+// foto_perfil vive en el bucket público fotos-perfil y sigue usando
+// getPublicUrl().
 const PRIVATE_DOCUMENT_TYPES = new Set<DocumentoTipo>([
   'dni_frente',
   'dni_dorso',
   'selfie_dni',
   'matricula',
+  'rc_poliza',
 ]);
+
+// El comprobante de póliza de RC puede ser el PDF de la aseguradora, no solo
+// una foto — el resto de los documentos de identidad se mantiene JPEG/PNG
+// only a propósito (no se relaja esa validación).
+const PDF_ALLOWED_TYPES = new Set<DocumentoTipo>(['rc_poliza']);
 
 @Injectable()
 export class ProfilesService {
@@ -56,7 +75,11 @@ export class ProfilesService {
   mapPrestadorProfile(prestador: any) {
     if (!prestador) return undefined;
     const { esta_verificado, url_certificacion, ...rest } = prestador;
-    return { ...rest, verificado: esta_verificado, certificacion_url: url_certificacion };
+    return {
+      ...rest,
+      verificado: esta_verificado,
+      certificacion_url: url_certificacion,
+    };
   }
 
   // ─── PERFIL BASE ────────────────────────────────────────────────────────
@@ -80,7 +103,10 @@ export class ProfilesService {
       .select()
       .single();
 
-    if (error) throw new BadRequestException('Error actualizando perfil: ' + error.message);
+    if (error)
+      throw new BadRequestException(
+        'Error actualizando perfil: ' + error.message,
+      );
 
     return { profile: data };
   }
@@ -102,7 +128,9 @@ export class ProfilesService {
       .eq('id', userId)
       .single();
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     return {
       id: profile.id,
@@ -195,7 +223,11 @@ export class ProfilesService {
 
   // ─── PRESTADOR: SETUP ────────────────────────────────────────────────────
 
-  async createOrUpdatePrestador(userId: string, dto: CreatePrestadorDto, accessToken: string) {
+  async createOrUpdatePrestador(
+    userId: string,
+    dto: CreatePrestadorDto,
+    accessToken: string,
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
     // Validar que todos los rubros existen
@@ -258,7 +290,10 @@ export class ProfilesService {
     }
 
     // Actualizar rol a prestador
-    await supabase.from('perfiles').update({ rol: 'prestador' }).eq('id', userId);
+    await supabase
+      .from('perfiles')
+      .update({ rol: 'prestador' })
+      .eq('id', userId);
 
     this.logger.log(`Perfil de prestador guardado: ${userId}`);
     return { prestador_profile: this.mapPrestadorProfile(result) };
@@ -266,7 +301,11 @@ export class ProfilesService {
 
   // ─── PRESTADOR: DISPONIBILIDAD + PING ───────────────────────────────────
 
-  async updateDisponibilidad(userId: string, dto: UpdateDisponibilidadDto, accessToken: string) {
+  async updateDisponibilidad(
+    userId: string,
+    dto: UpdateDisponibilidadDto,
+    accessToken: string,
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
     const updateData: Record<string, any> = { disponible: dto.disponible };
@@ -281,7 +320,8 @@ export class ProfilesService {
       .select('*')
       .single();
 
-    if (error || !data) throw new BadRequestException('Error actualizando disponibilidad');
+    if (error || !data)
+      throw new BadRequestException('Error actualizando disponibilidad');
 
     return { prestador_profile: this.mapPrestadorProfile(data) };
   }
@@ -298,6 +338,40 @@ export class ProfilesService {
     return { ok: true };
   }
 
+  // ─── PRESTADOR: SEGURO DE RC (beneficio interno, opcional) ──────────────
+  // rc_verificado no se toca acá — lo tilda un admin a mano tras revisar el
+  // comprobante (ver AdminService.setRcVerificado).
+
+  async updateRcSeguro(
+    userId: string,
+    dto: UpdateRcSeguroDto,
+    accessToken: string,
+  ) {
+    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+
+    const updateData: Record<string, any> = {};
+    if (dto.aseguradora !== undefined)
+      updateData.rc_aseguradora = dto.aseguradora;
+    if (dto.numero_poliza !== undefined)
+      updateData.rc_numero_poliza = dto.numero_poliza;
+    if (dto.vencimiento !== undefined)
+      updateData.rc_vencimiento = dto.vencimiento;
+
+    const { data, error } = await supabase
+      .from('perfiles_prestadores')
+      .update(updateData)
+      .eq('id', userId)
+      .select('*')
+      .single();
+
+    if (error)
+      throw new BadRequestException(
+        'Error guardando datos del seguro de RC: ' + error.message,
+      );
+
+    return { prestador_profile: this.mapPrestadorProfile(data) };
+  }
+
   // ─── PRESTADOR: UPLOAD DE DOCUMENTOS ────────────────────────────────────
 
   async uploadDocumento(
@@ -309,8 +383,14 @@ export class ProfilesService {
     if (!file) {
       throw new BadRequestException('El archivo es requerido');
     }
-    if (!this.ALLOWED_MIMETYPES.has(file.mimetype)) {
-      throw new BadRequestException('Solo se permiten imágenes JPEG o PNG');
+    const mimetypeValido =
+      this.ALLOWED_MIMETYPES.has(file.mimetype) ||
+      (PDF_ALLOWED_TYPES.has(tipo) && file.mimetype === 'application/pdf');
+    if (!mimetypeValido) {
+      const formatos = PDF_ALLOWED_TYPES.has(tipo)
+        ? 'imágenes JPEG/PNG o PDF'
+        : 'imágenes JPEG o PNG';
+      throw new BadRequestException(`Solo se permiten ${formatos}`);
     }
     if (file.size && file.size > this.MAX_SIZE_BYTES) {
       throw new BadRequestException('El archivo supera el máximo de 5MB');
@@ -334,7 +414,9 @@ export class ProfilesService {
 
     if (uploadError) {
       this.logger.error(`Upload ${tipo} falló: ${uploadError.message}`);
-      throw new BadRequestException(`Error subiendo ${tipo}: ${uploadError.message}`);
+      throw new BadRequestException(
+        `Error subiendo ${tipo}: ${uploadError.message}`,
+      );
     }
 
     let responseUrl: string;
@@ -348,7 +430,9 @@ export class ProfilesService {
       const signedUrl = await this.getSignedUrlForDocumento(bucket, fileName);
       responseUrl = signedUrl ?? fileName;
     } else {
-      const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
+      const { data: urlData } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(fileName);
       storedValue = urlData.publicUrl;
       responseUrl = urlData.publicUrl;
     }
@@ -359,7 +443,9 @@ export class ProfilesService {
       .eq('id', userId);
 
     if (updateError) {
-      this.logger.error(`Error guardando URL de ${tipo}: ${updateError.message}`);
+      this.logger.error(
+        `Error guardando URL de ${tipo}: ${updateError.message}`,
+      );
       throw new BadRequestException('Error guardando URL del documento');
     }
 
@@ -376,7 +462,11 @@ export class ProfilesService {
   }
 
   // Mantener retrocompatibilidad con el endpoint /prestador/certificacion
-  async uploadCertificacion(userId: string, file: Express.Multer.File, accessToken: string) {
+  async uploadCertificacion(
+    userId: string,
+    file: Express.Multer.File,
+    accessToken: string,
+  ) {
     return this.uploadDocumento(userId, 'matricula', file, accessToken);
   }
 
@@ -388,9 +478,13 @@ export class ProfilesService {
     ttlSeconds: number = this.SIGNED_URL_TTL_SECONDS,
   ): Promise<string | null> {
     const service = this.supabaseService.getServiceClient();
-    const { data, error } = await service.storage.from(bucket).createSignedUrl(path, ttlSeconds);
+    const { data, error } = await service.storage
+      .from(bucket)
+      .createSignedUrl(path, ttlSeconds);
     if (error) {
-      this.logger.warn(`No se pudo generar signed URL para ${path}: ${error.message}`);
+      this.logger.warn(
+        `No se pudo generar signed URL para ${path}: ${error.message}`,
+      );
       return null;
     }
     return data.signedUrl;
@@ -402,7 +496,10 @@ export class ProfilesService {
   // vez de un path, falla en silencio, y el admin muestra el documento como
   // "no subido" pese a existir. Mismo criterio que
   // EvidenciasCleanupService/DocumentosVerificacionCleanupService.extractStoragePath.
-  private extractStoragePath(value: string | null, bucket: string): string | null {
+  private extractStoragePath(
+    value: string | null,
+    bucket: string,
+  ): string | null {
     if (!value) return null;
     if (!value.startsWith('http')) return value;
 
@@ -414,7 +511,9 @@ export class ProfilesService {
 
       const path = parsed.pathname.substring(markerIndex + marker.length);
       const bucketPrefix = `${bucket}/`;
-      const cleaned = path.startsWith(bucketPrefix) ? path.substring(bucketPrefix.length) : path;
+      const cleaned = path.startsWith(bucketPrefix)
+        ? path.substring(bucketPrefix.length)
+        : path;
       return decodeURIComponent(cleaned);
     } catch {
       this.logger.warn(`Failed to extract storage path from url: ${value}`);
@@ -427,25 +526,54 @@ export class ProfilesService {
     const { data: prestador, error } = await supabase
       .from('perfiles_prestadores')
       .select(
-        'id, dni_frente_url, dni_dorso_url, selfie_dni_url, matricula_url, foto_perfil_url, esta_verificado, tipo_verificacion, verificacion_rechazada_at, cuenta_baja_at',
+        'id, dni_frente_url, dni_dorso_url, selfie_dni_url, matricula_url, foto_perfil_url, esta_verificado, tipo_verificacion, verificacion_rechazada_at, cuenta_baja_at, rc_poliza_url, rc_aseguradora, rc_numero_poliza, rc_vencimiento, rc_verificado',
       )
       .eq('id', prestadorId)
       .single();
 
-    if (error || !prestador) throw new NotFoundException('Prestador no encontrado');
+    if (error || !prestador)
+      throw new NotFoundException('Prestador no encontrado');
 
     const bucket = DOCUMENTOS_PRESTADORES_BUCKET;
-    const dniFrentePath = this.extractStoragePath(prestador.dni_frente_url, bucket);
-    const dniDorsoPath = this.extractStoragePath(prestador.dni_dorso_url, bucket);
-    const selfiePath = this.extractStoragePath(prestador.selfie_dni_url, bucket);
-    const matriculaPath = this.extractStoragePath(prestador.matricula_url, bucket);
+    const dniFrentePath = this.extractStoragePath(
+      prestador.dni_frente_url,
+      bucket,
+    );
+    const dniDorsoPath = this.extractStoragePath(
+      prestador.dni_dorso_url,
+      bucket,
+    );
+    const selfiePath = this.extractStoragePath(
+      prestador.selfie_dni_url,
+      bucket,
+    );
+    const matriculaPath = this.extractStoragePath(
+      prestador.matricula_url,
+      bucket,
+    );
+    const rcPolizaPath = this.extractStoragePath(
+      prestador.rc_poliza_url,
+      bucket,
+    );
 
-    const [dniFrente, dniDorso, selfie, matricula] = await Promise.all([
-      dniFrentePath ? this.getSignedUrlForDocumento(bucket, dniFrentePath) : Promise.resolve(null),
-      dniDorsoPath ? this.getSignedUrlForDocumento(bucket, dniDorsoPath) : Promise.resolve(null),
-      selfiePath ? this.getSignedUrlForDocumento(bucket, selfiePath) : Promise.resolve(null),
-      matriculaPath ? this.getSignedUrlForDocumento(bucket, matriculaPath) : Promise.resolve(null),
-    ]);
+    const [dniFrente, dniDorso, selfie, matricula, rcPoliza] =
+      await Promise.all([
+        dniFrentePath
+          ? this.getSignedUrlForDocumento(bucket, dniFrentePath)
+          : Promise.resolve(null),
+        dniDorsoPath
+          ? this.getSignedUrlForDocumento(bucket, dniDorsoPath)
+          : Promise.resolve(null),
+        selfiePath
+          ? this.getSignedUrlForDocumento(bucket, selfiePath)
+          : Promise.resolve(null),
+        matriculaPath
+          ? this.getSignedUrlForDocumento(bucket, matriculaPath)
+          : Promise.resolve(null),
+        rcPolizaPath
+          ? this.getSignedUrlForDocumento(bucket, rcPolizaPath)
+          : Promise.resolve(null),
+      ]);
 
     return {
       prestador_id: prestador.id,
@@ -454,12 +582,17 @@ export class ProfilesService {
         dni_dorso: { url: dniDorso, subido: !!prestador.dni_dorso_url },
         selfie_dni: { url: selfie, subido: !!prestador.selfie_dni_url },
         matricula: { url: matricula, subido: !!prestador.matricula_url },
+        rc_poliza: { url: rcPoliza, subido: !!prestador.rc_poliza_url },
       },
       foto_perfil_url: prestador.foto_perfil_url ?? null,
       esta_verificado: prestador.esta_verificado,
       tipo_verificacion: prestador.tipo_verificacion,
       verificacion_rechazada_at: prestador.verificacion_rechazada_at,
       cuenta_baja_at: prestador.cuenta_baja_at,
+      rc_aseguradora: prestador.rc_aseguradora ?? null,
+      rc_numero_poliza: prestador.rc_numero_poliza ?? null,
+      rc_vencimiento: prestador.rc_vencimiento ?? null,
+      rc_verificado: prestador.rc_verificado,
       signed_urls_ttl_segundos: this.SIGNED_URL_TTL_SECONDS,
     };
   }

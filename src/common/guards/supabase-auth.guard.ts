@@ -34,7 +34,7 @@ export class SupabaseAuthGuard implements CanActivate {
       // Attach user and token to request
       request.user = user;
       request.accessToken = token;
-      
+
       this.logger.log(`User authenticated: ${user.id}`);
       return true;
     } catch (error) {

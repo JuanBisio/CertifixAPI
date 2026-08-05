@@ -45,11 +45,15 @@ export class SolicitudesTimeoutService {
             .from('solicitudes_trabajo')
             .update({
               timeout_notificado_at: now,
-              timeout_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              timeout_at: new Date(
+                Date.now() + 24 * 60 * 60 * 1000,
+              ).toISOString(),
             })
             .eq('id', solicitud.id);
         } catch (err: any) {
-          this.logger.error(`Error en primer timeout solicitud ${solicitud.id}: ${err.message}`);
+          this.logger.error(
+            `Error en primer timeout solicitud ${solicitud.id}: ${err.message}`,
+          );
         }
       }
     }
@@ -66,7 +70,9 @@ export class SolicitudesTimeoutService {
     if (err2) {
       this.logger.error(`Error en checkTimeouts (pasada 2): ${err2.message}`);
     } else if (definitivas?.length) {
-      this.logger.log(`${definitivas.length} solicitudes a cancelar por timeout definitivo`);
+      this.logger.log(
+        `${definitivas.length} solicitudes a cancelar por timeout definitivo`,
+      );
       for (const solicitud of definitivas) {
         try {
           const { data: cancelada } = await supabase
@@ -86,9 +92,13 @@ export class SolicitudesTimeoutService {
             'Solicitud cancelada',
             'No encontramos un técnico disponible en este momento. Podés crear una nueva solicitud.',
           );
-          this.logger.log(`Solicitud ${solicitud.id} cancelada por timeout definitivo`);
+          this.logger.log(
+            `Solicitud ${solicitud.id} cancelada por timeout definitivo`,
+          );
         } catch (err: any) {
-          this.logger.error(`Error cancelando solicitud ${solicitud.id}: ${err.message}`);
+          this.logger.error(
+            `Error cancelando solicitud ${solicitud.id}: ${err.message}`,
+          );
         }
       }
     }
@@ -107,7 +117,9 @@ export class SolicitudesTimeoutService {
     if (err3) {
       this.logger.error(`Error en checkTimeouts (pasada 3): ${err3.message}`);
     } else if (sinCandidatos?.length) {
-      this.logger.log(`${sinCandidatos.length} solicitudes programadas a cancelar sin candidatos`);
+      this.logger.log(
+        `${sinCandidatos.length} solicitudes programadas a cancelar sin candidatos`,
+      );
       for (const solicitud of sinCandidatos) {
         try {
           const { data: cancelada } = await supabase
@@ -128,9 +140,13 @@ export class SolicitudesTimeoutService {
             'Solicitud cancelada',
             'Ningún técnico se postuló a tiempo. Podés crear una nueva solicitud.',
           );
-          this.logger.log(`Solicitud ${solicitud.id} cancelada por falta de postulaciones`);
+          this.logger.log(
+            `Solicitud ${solicitud.id} cancelada por falta de postulaciones`,
+          );
         } catch (err: any) {
-          this.logger.error(`Error cancelando solicitud programada ${solicitud.id}: ${err.message}`);
+          this.logger.error(
+            `Error cancelando solicitud programada ${solicitud.id}: ${err.message}`,
+          );
         }
       }
     }

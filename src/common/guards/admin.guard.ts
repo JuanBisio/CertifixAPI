@@ -26,16 +26,19 @@ export class AdminGuard implements CanActivate {
     // Dev bypass (set ADMIN_BYPASS=true in env to skip admin check).
     // Gateado también por NODE_ENV: aunque ADMIN_BYPASS quede mal seteada en prod
     // por error de copy-paste del .env, en producción nunca tiene efecto.
-    if (process.env.ADMIN_BYPASS === 'true' && process.env.NODE_ENV !== 'production') {
+    if (
+      process.env.ADMIN_BYPASS === 'true' &&
+      process.env.NODE_ENV !== 'production'
+    ) {
       this.logger.warn('ADMIN_BYPASS enabled: skipping admin check');
       return true;
     }
 
     try {
       // Check Supabase auth role in JWT (app_metadata roles or role)
-      const appMeta = (user as any).app_metadata || {};
+      const appMeta = user.app_metadata || {};
       const roles = (appMeta.roles as string[]) || [];
-      const singleRole = (appMeta.role as string) || (user as any).role;
+      const singleRole = (appMeta.role as string) || user.role;
 
       const isAdminRole =
         roles.map((r) => r?.toLowerCase()).includes('admin') ||
@@ -47,7 +50,9 @@ export class AdminGuard implements CanActivate {
 
       // Fallback: allow list from env (comma-separated emails)
       const allowList =
-        process.env.ADMIN_EMAILS?.split(',').map((e) => e.trim().toLowerCase()) || [];
+        process.env.ADMIN_EMAILS?.split(',').map((e) =>
+          e.trim().toLowerCase(),
+        ) || [];
       if (user.email && allowList.includes(user.email.toLowerCase())) {
         this.logger.log(`Admin access granted via allowlist for ${user.email}`);
         return true;

@@ -7,7 +7,10 @@ export class CreateEvidenciaDto {
   @IsUUID()
   trabajo_id: string;
 
-  @ApiProperty({ example: false, description: 'Is this evidence for a dispute/claim?' })
+  @ApiProperty({
+    example: false,
+    description: 'Is this evidence for a dispute/claim?',
+  })
   @Type(() => String)
   @Transform(({ value }) => String(value).toLowerCase() === 'true')
   @IsBoolean()

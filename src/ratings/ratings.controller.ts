@@ -1,9 +1,17 @@
 import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { RatingsService } from './ratings.service';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
-import { CurrentUser, AccessToken } from '../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AccessToken,
+} from '../common/decorators/current-user.decorator';
 import type { User } from '@supabase/supabase-js';
 
 @ApiTags('Ratings')
@@ -16,7 +24,10 @@ export class RatingsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Calificar al prestador de una solicitud cerrada' })
   @ApiResponse({ status: 201, description: 'Calificación creada' })
-  @ApiResponse({ status: 400, description: 'Solicitud no cerrada o ya calificada' })
+  @ApiResponse({
+    status: 400,
+    description: 'Solicitud no cerrada o ya calificada',
+  })
   @ApiResponse({ status: 403, description: 'No es tu solicitud' })
   async create(
     @CurrentUser() user: User,
@@ -33,7 +44,9 @@ export class RatingsController {
   }
 
   @Get('cliente/:id')
-  @ApiOperation({ summary: 'Ver calificaciones públicas de un cliente (RQ-04)' })
+  @ApiOperation({
+    summary: 'Ver calificaciones públicas de un cliente (RQ-04)',
+  })
   async getRatingsCliente(@Param('id') id: string) {
     return this.ratingsService.getRatingsCliente(id);
   }
@@ -41,9 +54,15 @@ export class RatingsController {
   @Post('cliente')
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'El prestador califica al cliente de una solicitud finalizada o cerrada' })
+  @ApiOperation({
+    summary:
+      'El prestador califica al cliente de una solicitud finalizada o cerrada',
+  })
   @ApiResponse({ status: 201, description: 'Calificación creada' })
-  @ApiResponse({ status: 400, description: 'Solicitud no finalizada/cerrada o ya calificada' })
+  @ApiResponse({
+    status: 400,
+    description: 'Solicitud no finalizada/cerrada o ya calificada',
+  })
   @ApiResponse({ status: 403, description: 'No es tu solicitud' })
   async createRatingCliente(
     @CurrentUser() user: User,

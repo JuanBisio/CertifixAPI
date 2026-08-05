@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateRubroDto } from './dto/create-rubro.dto';
 import { UpdateRubroDto } from './dto/update-rubro.dto';
@@ -68,7 +73,11 @@ export class RubrosService {
     // uuid random, evita colisiones sin depender de un slug del nombre.
     const { data, error } = await supabase
       .from('rubros')
-      .insert({ id: randomUUID(), nombre: dto.nombre, icono: dto.icono ?? null })
+      .insert({
+        id: randomUUID(),
+        nombre: dto.nombre,
+        icono: dto.icono ?? null,
+      })
       .select()
       .single();
 

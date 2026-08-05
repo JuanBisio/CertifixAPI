@@ -2,8 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { SupabaseService } from '../supabase/supabase.service';
 
-const INACTIVIDAD_MINUTOS = 60;      // minutos sin actividad antes de notificar
-const RESPUESTA_PUSH_MINUTOS = 5;    // si no responde en 5 min → deshabilitar
+const INACTIVIDAD_MINUTOS = 60; // minutos sin actividad antes de notificar
+const RESPUESTA_PUSH_MINUTOS = 5; // si no responde en 5 min → deshabilitar
 
 @Injectable()
 export class PrestadorInactividadService {
@@ -20,7 +20,8 @@ export class PrestadorInactividadService {
     // 1. Deshabilitar prestadores que llevan más de (60 + 5) min sin actividad
     //    (ya se les envió push y no respondieron)
     const limiteDeshabilitacion = new Date(
-      ahora.getTime() - (INACTIVIDAD_MINUTOS + RESPUESTA_PUSH_MINUTOS) * 60 * 1000,
+      ahora.getTime() -
+        (INACTIVIDAD_MINUTOS + RESPUESTA_PUSH_MINUTOS) * 60 * 1000,
     ).toISOString();
 
     const { data: aDesactivar, error: errorDesact } = await supabase
@@ -34,7 +35,9 @@ export class PrestadorInactividadService {
     if (errorDesact) {
       this.logger.error(`Error desactivando inactivos: ${errorDesact.message}`);
     } else if (aDesactivar?.length) {
-      this.logger.log(`${aDesactivar.length} prestadores desactivados por inactividad`);
+      this.logger.log(
+        `${aDesactivar.length} prestadores desactivados por inactividad`,
+      );
     }
 
     // 2. Notificar prestadores que llevan exactamente 60 min sin actividad
@@ -85,7 +88,9 @@ export class PrestadorInactividadService {
           })),
         ),
       });
-      this.logger.log(`Push de inactividad enviado a ${validTokens.length} prestadores`);
+      this.logger.log(
+        `Push de inactividad enviado a ${validTokens.length} prestadores`,
+      );
     } catch (err: any) {
       this.logger.error(`Error enviando push inactividad: ${err.message}`);
     }

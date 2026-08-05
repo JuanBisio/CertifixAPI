@@ -55,7 +55,9 @@ export class EvidenciasCleanupService {
       .in('id', trabajoIds);
 
     if (trabajosError) {
-      this.logger.error(`Unable to fetch trabajos for cleanup: ${trabajosError.message}`);
+      this.logger.error(
+        `Unable to fetch trabajos for cleanup: ${trabajosError.message}`,
+      );
       return;
     }
 
@@ -75,13 +77,18 @@ export class EvidenciasCleanupService {
       .in('trabajo_id', trabajoIds);
 
     if (disputasError) {
-      this.logger.error(`Unable to fetch disputas for cleanup: ${disputasError.message}`);
+      this.logger.error(
+        `Unable to fetch disputas for cleanup: ${disputasError.message}`,
+      );
       return;
     }
 
     const blockedTrabajoIds = new Set(
       (disputasAbiertas || [])
-        .filter((d) => d?.estado && this.disputeStates.has(String(d.estado).toLowerCase()))
+        .filter(
+          (d) =>
+            d?.estado && this.disputeStates.has(String(d.estado).toLowerCase()),
+        )
         .map((d) => d.trabajo_id),
     );
 
@@ -104,7 +111,9 @@ export class EvidenciasCleanupService {
       const storagePath = this.extractStoragePath(evidencia.url_archivo);
 
       if (!storagePath) {
-        this.logger.warn(`Could not derive storage path for evidencia ${evidencia.id}`);
+        this.logger.warn(
+          `Could not derive storage path for evidencia ${evidencia.id}`,
+        );
         continue;
       }
 
@@ -125,7 +134,9 @@ export class EvidenciasCleanupService {
         .eq('id', evidencia.id);
 
       if (deleteError) {
-        this.logger.error(`Failed deleting evidencia row ${evidencia.id}: ${deleteError.message}`);
+        this.logger.error(
+          `Failed deleting evidencia row ${evidencia.id}: ${deleteError.message}`,
+        );
         continue;
       }
 
@@ -156,7 +167,9 @@ export class EvidenciasCleanupService {
       const path = parsed.pathname.substring(markerIndex + marker.length);
       const bucketPrefix = `${this.bucket}/`;
 
-      const cleaned = path.startsWith(bucketPrefix) ? path.substring(bucketPrefix.length) : path;
+      const cleaned = path.startsWith(bucketPrefix)
+        ? path.substring(bucketPrefix.length)
+        : path;
       return decodeURIComponent(cleaned);
     } catch (err) {
       this.logger.warn(`Failed to extract storage path from url: ${url}`);

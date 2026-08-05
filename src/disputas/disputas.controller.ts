@@ -7,11 +7,19 @@ import {
   UseGuards,
   Logger,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { DisputasService } from './disputas.service';
 import { CreateDisputaDto } from './dto/create-disputa.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
-import { CurrentUser, AccessToken } from '../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AccessToken,
+} from '../common/decorators/current-user.decorator';
 import type { User } from '@supabase/supabase-js';
 
 @ApiTags('Disputas (Disputes)')
@@ -32,7 +40,9 @@ export class DisputasController {
     @AccessToken() accessToken: string,
     @Body() createDisputaDto: CreateDisputaDto,
   ) {
-    this.logger.log(`Create dispute for trabajo: ${createDisputaDto.trabajo_id}`);
+    this.logger.log(
+      `Create dispute for trabajo: ${createDisputaDto.trabajo_id}`,
+    );
     return this.disputasService.create(user.id, createDisputaDto, accessToken);
   }
 

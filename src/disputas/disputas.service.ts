@@ -45,7 +45,9 @@ export class DisputasService {
         .single();
 
       if (existing) {
-        throw new ConflictException('Dispute already exists for this work request');
+        throw new ConflictException(
+          'Dispute already exists for this work request',
+        );
       }
 
       // Create dispute
@@ -65,7 +67,9 @@ export class DisputasService {
         throw new BadRequestException('Failed to create dispute');
       }
 
-      this.logger.log(`Dispute created for trabajo: ${createDisputaDto.trabajo_id}`);
+      this.logger.log(
+        `Dispute created for trabajo: ${createDisputaDto.trabajo_id}`,
+      );
       return { disputa: data };
     } catch (error) {
       if (
@@ -80,11 +84,7 @@ export class DisputasService {
     }
   }
 
-  async findByTrabajo(
-    trabajoId: string,
-    userId: string,
-    accessToken: string,
-  ) {
+  async findByTrabajo(trabajoId: string, userId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
     try {

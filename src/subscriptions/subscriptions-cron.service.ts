@@ -34,20 +34,28 @@ export class SubscriptionsCronService {
       .not('mp_preapproval_id', 'is', null);
 
     if (error) {
-      this.logger.error(`Error buscando preapprovals para sincronizar: ${error.message}`);
+      this.logger.error(
+        `Error buscando preapprovals para sincronizar: ${error.message}`,
+      );
       return;
     }
 
     for (const prestador of prestadores ?? []) {
       try {
-        await this.subscriptionsService.syncPreapprovalStatus(prestador.mp_preapproval_id);
+        await this.subscriptionsService.syncPreapprovalStatus(
+          prestador.mp_preapproval_id,
+        );
       } catch (err: any) {
-        this.logger.error(`Error sincronizando preapproval de prestador ${prestador.id}: ${err.message}`);
+        this.logger.error(
+          `Error sincronizando preapproval de prestador ${prestador.id}: ${err.message}`,
+        );
       }
     }
 
     if (prestadores?.length) {
-      this.logger.log(`Sincronizados ${prestadores.length} preapprovals con MercadoPago`);
+      this.logger.log(
+        `Sincronizados ${prestadores.length} preapprovals con MercadoPago`,
+      );
     }
   }
 
@@ -67,19 +75,25 @@ export class SubscriptionsCronService {
       .select('id');
 
     if (error) {
-      this.logger.error(`Error desactivando suscripciones vencidas: ${error.message}`);
+      this.logger.error(
+        `Error desactivando suscripciones vencidas: ${error.message}`,
+      );
       return;
     }
 
     if (desactivados?.length) {
-      this.logger.log(`${desactivados.length} suscripciones desactivadas por vencimiento`);
+      this.logger.log(
+        `${desactivados.length} suscripciones desactivadas por vencimiento`,
+      );
     }
   }
 
   private async recordarProximosVencimientos() {
     const supabase = this.supabaseService.getServiceClient();
     const now = new Date();
-    const windowEnd = new Date(now.getTime() + REMINDER_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(
+      now.getTime() + REMINDER_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+    );
 
     const { data: proximosAVencer, error } = await supabase
       .from('perfiles_prestadores')
@@ -89,7 +103,9 @@ export class SubscriptionsCronService {
       .gt('suscripcion_vence_at', now.toISOString());
 
     if (error) {
-      this.logger.error(`Error buscando vencimientos próximos: ${error.message}`);
+      this.logger.error(
+        `Error buscando vencimientos próximos: ${error.message}`,
+      );
       return;
     }
 
@@ -121,9 +137,13 @@ export class SubscriptionsCronService {
           })),
         ),
       });
-      this.logger.log(`Recordatorio de vencimiento enviado a ${validTokens.length} prestadores`);
+      this.logger.log(
+        `Recordatorio de vencimiento enviado a ${validTokens.length} prestadores`,
+      );
     } catch (err: any) {
-      this.logger.error(`Error enviando recordatorio de suscripción: ${err.message}`);
+      this.logger.error(
+        `Error enviando recordatorio de suscripción: ${err.message}`,
+      );
     }
   }
 }

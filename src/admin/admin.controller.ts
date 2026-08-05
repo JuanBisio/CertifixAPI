@@ -1,9 +1,34 @@
-import { Controller, Get, Patch, Post, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
-import { IsBoolean, IsOptional, IsIn, IsString, IsNotEmpty, IsInt, Min, Max, IsNumber } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsIn,
+  IsString,
+  IsNotEmpty,
+  IsInt,
+  Min,
+  Max,
+  IsNumber,
+} from 'class-validator';
 import type { Request } from 'express';
 import { ListSolicitudesQuery } from './dto/list-solicitudes.dto';
 
@@ -46,6 +71,13 @@ class ResolveDisputaDto {
   @IsNotEmpty()
   @ApiProperty()
   nota: string;
+}
+
+class ProcesarRevocacionDto {
+  @IsString()
+  @IsNotEmpty()
+  @ApiProperty()
+  nota_admin: string;
 }
 
 class ExtenderSuscripcionDto {
@@ -94,7 +126,10 @@ export class AdminController {
   }
 
   @Get('prestadores')
-  async listPrestadores(@Query() query: ListPrestadoresQuery, @Req() req: Request) {
+  async listPrestadores(
+    @Query() query: ListPrestadoresQuery,
+    @Req() req: Request,
+  ) {
     const accessToken = (req as any).accessToken as string;
     const verificado = query.verificado;
     return this.adminService.listPrestadores(accessToken, verificado);
@@ -107,7 +142,12 @@ export class AdminController {
     @Req() req: Request,
   ) {
     const accessToken = (req as any).accessToken as string;
-    return this.adminService.setVerificado(accessToken, id, dto.value, dto.tipo_verificacion);
+    return this.adminService.setVerificado(
+      accessToken,
+      id,
+      dto.value,
+      dto.tipo_verificacion,
+    );
   }
 
   @Patch('prestadores/:id/disponible')
@@ -118,6 +158,11 @@ export class AdminController {
   ) {
     const accessToken = (req as any).accessToken as string;
     return this.adminService.setDisponible(accessToken, id, dto.value);
+  }
+
+  @Patch('prestadores/:id/rc-verificado')
+  async setRcVerificado(@Param('id') id: string, @Body() dto: UpdateFlagDto) {
+    return this.adminService.setRcVerificado(id, dto.value);
   }
 
   @Get('prestadores/:id/documentos')
@@ -137,8 +182,14 @@ export class AdminController {
   }
 
   @Patch('prestadores/:id/baja')
-  async darDeBajaPrestador(@Param('id') id: string, @Body() dto: BajaPrestadorDto) {
-    return this.adminService.darDeBajaPrestador(id, !!dto.confirmar_con_trabajo_activo);
+  async darDeBajaPrestador(
+    @Param('id') id: string,
+    @Body() dto: BajaPrestadorDto,
+  ) {
+    return this.adminService.darDeBajaPrestador(
+      id,
+      !!dto.confirmar_con_trabajo_activo,
+    );
   }
 
   @Get('suscripciones')
@@ -153,12 +204,19 @@ export class AdminController {
   }
 
   @Patch('prestadores/:id/suscripcion/extender')
-  async extenderSuscripcion(@Param('id') id: string, @Body() dto: ExtenderSuscripcionDto) {
+  async extenderSuscripcion(
+    @Param('id') id: string,
+    @Body() dto: ExtenderSuscripcionDto,
+  ) {
     return this.adminService.extenderSuscripcion(id, dto.dias);
   }
 
   @Post('prestadores/:id/suscripcion/pago-offline')
-  async registrarPagoOffline(@Param('id') id: string, @Body() dto: PagoOfflineDto, @Req() req: Request) {
+  async registrarPagoOffline(
+    @Param('id') id: string,
+    @Body() dto: PagoOfflineDto,
+    @Req() req: Request,
+  ) {
     const adminEmail = (req as any).user?.email as string | undefined;
     return this.adminService.registrarPagoOffline(id, dto, adminEmail);
   }
@@ -175,13 +233,37 @@ export class AdminController {
   }
 
   @Patch('disputas/:id/resolve')
-  async resolveDisputa(@Param('id') id: string, @Body() dto: ResolveDisputaDto) {
+  async resolveDisputa(
+    @Param('id') id: string,
+    @Body() dto: ResolveDisputaDto,
+  ) {
     return this.adminService.resolveDisputa(id, dto.resolution, dto.nota);
   }
 
   @Patch('disputas/:id/reopen')
   async reopenDisputa(@Param('id') id: string) {
     return this.adminService.reopenDisputa(id);
+  }
+
+  @Get('revocaciones')
+  async listRevocaciones(@Req() req: Request) {
+    const accessToken = (req as any).accessToken as string;
+    return this.adminService.listRevocaciones(accessToken);
+  }
+
+  @Get('revocaciones/:id')
+  async getRevocacionDetail(@Param('id') id: string) {
+    return this.adminService.getRevocacionDetail(id);
+  }
+
+  @Patch('revocaciones/:id/procesar')
+  async procesarRevocacion(
+    @Param('id') id: string,
+    @Body() dto: ProcesarRevocacionDto,
+    @Req() req: Request,
+  ) {
+    const adminEmail = (req as any).user?.email as string | undefined;
+    return this.adminService.procesarRevocacion(id, dto.nota_admin, adminEmail);
   }
 
   @Get('solicitudes')

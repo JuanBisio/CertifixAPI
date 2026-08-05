@@ -71,7 +71,9 @@ export class SolicitudesService {
       ? null
       : new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const postulacionDeadlineAt = esProgramado
-      ? new Date(Date.now() + POSTULACION_DEADLINE_MINUTES * 60 * 1000).toISOString()
+      ? new Date(
+          Date.now() + POSTULACION_DEADLINE_MINUTES * 60 * 1000,
+        ).toISOString()
       : null;
 
     const { data, error } = await supabase
@@ -94,7 +96,9 @@ export class SolicitudesService {
         postulacion_deadline_at: postulacionDeadlineAt,
         created_at: new Date().toISOString(),
       })
-      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .select(
+        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)',
+      )
       .single();
 
     if (error) {
@@ -111,12 +115,20 @@ export class SolicitudesService {
         ? {
             title: 'Nuevo trabajo programado',
             body: `Postulate y coordiná el precio por chat: ${dto.descripcion.substring(0, 90)}`,
-            data: { solicitudId: data.id, rubroId: data.rubro_id, estado: data.estado },
+            data: {
+              solicitudId: data.id,
+              rubroId: data.rubro_id,
+              estado: data.estado,
+            },
           }
         : {
             title: 'Nuevo trabajo disponible',
             body: dto.descripcion.substring(0, 120),
-            data: { solicitudId: data.id, rubroId: data.rubro_id, estado: data.estado },
+            data: {
+              solicitudId: data.id,
+              rubroId: data.rubro_id,
+              estado: data.estado,
+            },
           },
     );
 
@@ -126,7 +138,11 @@ export class SolicitudesService {
 
   // ─── FOTO DEL PROBLEMA (previo a crear la solicitud) ──────────────────────
 
-  async uploadFotoProblema(userId: string, file: Express.Multer.File, accessToken: string) {
+  async uploadFotoProblema(
+    userId: string,
+    file: Express.Multer.File,
+    accessToken: string,
+  ) {
     if (!file) throw new BadRequestException('File is required');
     if (!file.mimetype?.startsWith('image/')) {
       throw new BadRequestException('Solo se permiten imágenes');
@@ -148,8 +164,12 @@ export class SolicitudesService {
       });
 
     if (uploadError) {
-      this.logger.error(`Foto de problema: upload falló: ${uploadError.message}`);
-      throw new BadRequestException('No se pudo subir la foto: ' + uploadError.message);
+      this.logger.error(
+        `Foto de problema: upload falló: ${uploadError.message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo subir la foto: ' + uploadError.message,
+      );
     }
 
     // fotos_urls espera una URL usable directamente (no hay, a diferencia de
@@ -160,7 +180,9 @@ export class SolicitudesService {
       .createSignedUrl(storagePath, FOTO_PROBLEMA_SIGNED_URL_SECONDS);
 
     if (signedError || !signedData) {
-      this.logger.error(`Foto de problema: no se pudo firmar la URL: ${signedError?.message}`);
+      this.logger.error(
+        `Foto de problema: no se pudo firmar la URL: ${signedError?.message}`,
+      );
       throw new BadRequestException('No se pudo generar la URL de la foto');
     }
 
@@ -182,7 +204,9 @@ export class SolicitudesService {
 
     let query = supabase
       .from('solicitudes_trabajo')
-      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .select(
+        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)',
+      )
       .order('created_at', { ascending: false });
 
     if (profile.rol === 'cliente') {
@@ -196,7 +220,8 @@ export class SolicitudesService {
         .eq('id', userId)
         .single();
 
-      if (!prestador?.esta_verificado || !prestador?.disponible) return { solicitudes: [] };
+      if (!prestador?.esta_verificado || !prestador?.disponible)
+        return { solicitudes: [] };
 
       // Obtener los rubros del prestador
       const { data: rubros } = await supabase
@@ -207,9 +232,7 @@ export class SolicitudesService {
       const rubroIds = (rubros ?? []).map((r: any) => r.rubro_id);
       if (!rubroIds.length) return { solicitudes: [] };
 
-      query = query
-        .eq('estado', 'buscando')
-        .in('rubro_id', rubroIds);
+      query = query.eq('estado', 'buscando').in('rubro_id', rubroIds);
     }
 
     const { data, error } = await query;
@@ -229,7 +252,9 @@ export class SolicitudesService {
           .eq('prestador_id', userId)
           .in('solicitud_id', programadoIds);
 
-        const yaPostuladoIds = new Set((misCandidaturas ?? []).map((c: any) => c.solicitud_id));
+        const yaPostuladoIds = new Set(
+          (misCandidaturas ?? []).map((c: any) => c.solicitud_id),
+        );
 
         // Para programado: no ofrecer de nuevo lo ya postulado, ni lo con cupo completo
         filtered = filtered.filter((d: any) => {
@@ -264,7 +289,9 @@ export class SolicitudesService {
       // límite de "un trabajo a la vez"), así que devolvemos todos, no solo el último.
       const { data, error } = await supabase
         .from('solicitudes_trabajo')
-        .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono)')
+        .select(
+          '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono)',
+        )
         .eq('prestador_id', userId)
         .in('estado', ['aceptado', 'en_camino', 'en_trabajo', 'finalizado'])
         .order('created_at', { ascending: false });
@@ -278,9 +305,17 @@ export class SolicitudesService {
     if (profile?.rol === 'cliente') {
       const { data, error } = await supabase
         .from('solicitudes_trabajo')
-        .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre, telefono)')
+        .select(
+          '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre, telefono)',
+        )
         .eq('cliente_id', userId)
-        .in('estado', ['buscando', 'aceptado', 'en_camino', 'en_trabajo', 'finalizado'])
+        .in('estado', [
+          'buscando',
+          'aceptado',
+          'en_camino',
+          'en_trabajo',
+          'finalizado',
+        ])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -311,7 +346,9 @@ export class SolicitudesService {
 
     const { data, error } = await supabase
       .from('solicitudes_trabajo')
-      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .select(
+        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)',
+      )
       .eq('prestador_id', userId)
       .in('estado', ['finalizado', 'cerrado'])
       .order('created_at', { ascending: false });
@@ -356,7 +393,11 @@ export class SolicitudesService {
     const isPrestadorAsignado = data.prestador_id === userId;
 
     let esCandidato = false;
-    if (profile?.rol === 'prestador' && data.urgencia === 'programado' && !isPrestadorAsignado) {
+    if (
+      profile?.rol === 'prestador' &&
+      data.urgencia === 'programado' &&
+      !isPrestadorAsignado
+    ) {
       const { data: candidatura } = await supabase
         .from('solicitud_candidatos')
         .select('id')
@@ -371,13 +412,16 @@ export class SolicitudesService {
     // Si no es candidato, solo puede "visitar" solicitudes buscando estando verificado.
     const isPrestadorVisitante =
       profile?.rol === 'prestador' &&
-      (esCandidato || (prestadorProfile?.esta_verificado && data.estado === 'buscando'));
+      (esCandidato ||
+        (prestadorProfile?.esta_verificado && data.estado === 'buscando'));
 
     if (!isCliente && !isPrestadorAsignado && !isPrestadorVisitante) {
       throw new ForbiddenException('Sin acceso a esta solicitud');
     }
 
-    return { solicitud: this.sanitizeLocation(data, isCliente || isPrestadorAsignado) };
+    return {
+      solicitud: this.sanitizeLocation(data, isCliente || isPrestadorAsignado),
+    };
   }
 
   // ─── ACCEPT (prestador) ───────────────────────────────────────────────────
@@ -408,10 +452,14 @@ export class SolicitudesService {
       .single();
 
     if (!prestador?.esta_verificado) {
-      throw new ForbiddenException('Debes estar verificado para aceptar trabajos');
+      throw new ForbiddenException(
+        'Debes estar verificado para aceptar trabajos',
+      );
     }
     if (!prestador?.disponible) {
-      throw new ForbiddenException('Debes estar disponible para aceptar trabajos');
+      throw new ForbiddenException(
+        'Debes estar disponible para aceptar trabajos',
+      );
     }
 
     // Verificar que el rubro coincide
@@ -428,7 +476,9 @@ export class SolicitudesService {
       );
     }
     if (solicitud.estado !== 'buscando') {
-      throw new ConflictException('Este trabajo ya fue tomado por otro técnico');
+      throw new ConflictException(
+        'Este trabajo ya fue tomado por otro técnico',
+      );
     }
 
     const { data: rubroMatch } = await supabase
@@ -459,7 +509,9 @@ export class SolicitudesService {
       .single();
 
     if (error || !updated) {
-      throw new ConflictException('Este trabajo ya fue tomado por otro técnico');
+      throw new ConflictException(
+        'Este trabajo ya fue tomado por otro técnico',
+      );
     }
 
     void this.notificationsService.notifyUsers(
@@ -470,7 +522,9 @@ export class SolicitudesService {
       { solicitudId, estado: 'aceptado' },
     );
 
-    this.logger.log(`Solicitud ${solicitudId} aceptada por prestador ${prestadorId}`);
+    this.logger.log(
+      `Solicitud ${solicitudId} aceptada por prestador ${prestadorId}`,
+    );
     return { solicitud: updated };
   }
 
@@ -491,7 +545,9 @@ export class SolicitudesService {
       .single();
 
     if (profile?.rol !== 'prestador') {
-      throw new ForbiddenException('Solo prestadores pueden postularse a trabajos');
+      throw new ForbiddenException(
+        'Solo prestadores pueden postularse a trabajos',
+      );
     }
     if (profile.suspendido) {
       throw new ForbiddenException(
@@ -520,7 +576,9 @@ export class SolicitudesService {
 
     if (!solicitud) throw new NotFoundException('Solicitud no encontrada');
     if (solicitud.urgencia !== 'programado') {
-      throw new BadRequestException('Esta solicitud no usa el flujo de postulación');
+      throw new BadRequestException(
+        'Esta solicitud no usa el flujo de postulación',
+      );
     }
 
     const { data: rubroMatch } = await supabase
@@ -534,17 +592,22 @@ export class SolicitudesService {
       throw new ForbiddenException('El trabajo no coincide con tus rubros');
     }
 
-    const { data: candidato, error } = await supabase.rpc('postularse_a_solicitud', {
-      p_solicitud_id: solicitudId,
-      p_prestador_id: prestadorId,
-      p_presupuesto: presupuesto ?? null,
-    });
+    const { data: candidato, error } = await supabase.rpc(
+      'postularse_a_solicitud',
+      {
+        p_solicitud_id: solicitudId,
+        p_prestador_id: prestadorId,
+        p_presupuesto: presupuesto ?? null,
+      },
+    );
 
     if (error) {
       if (error.message?.includes('ya_postulado')) {
         throw new ConflictException('Ya te postulaste a esta solicitud');
       }
-      throw new ConflictException('Cupo completo o la solicitud ya no acepta postulaciones');
+      throw new ConflictException(
+        'Cupo completo o la solicitud ya no acepta postulaciones',
+      );
     }
 
     void this.notificationsService.notifyUsers(
@@ -555,13 +618,19 @@ export class SolicitudesService {
       { solicitudId, estado: solicitud.estado },
     );
 
-    this.logger.log(`Prestador ${prestadorId} se postuló a solicitud ${solicitudId}`);
+    this.logger.log(
+      `Prestador ${prestadorId} se postuló a solicitud ${solicitudId}`,
+    );
     return { candidato };
   }
 
   // ─── CANDIDATOS (cliente ve todos, prestador ve el propio) ──────────────
 
-  async getCandidatos(solicitudId: string, userId: string, accessToken: string) {
+  async getCandidatos(
+    solicitudId: string,
+    userId: string,
+    accessToken: string,
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
     const { data: solicitud } = await supabase
@@ -572,14 +641,18 @@ export class SolicitudesService {
 
     if (!solicitud) throw new NotFoundException('Solicitud no encontrada');
     if (solicitud.urgencia !== 'programado') {
-      throw new BadRequestException('Esta solicitud no usa el flujo de postulación');
+      throw new BadRequestException(
+        'Esta solicitud no usa el flujo de postulación',
+      );
     }
 
     const isCliente = solicitud.cliente_id === userId;
 
     let query = supabase
       .from('solicitud_candidatos')
-      .select('*, perfiles_prestadores(id, rating, trabajos_completados, foto_perfil_url, perfiles(id, nombre))')
+      .select(
+        '*, perfiles_prestadores(id, rating, trabajos_completados, foto_perfil_url, perfiles(id, nombre))',
+      )
       .eq('solicitud_id', solicitudId)
       .order('created_at', { ascending: true });
 
@@ -594,7 +667,9 @@ export class SolicitudesService {
     if (error) throw new BadRequestException('Error obteniendo candidatos');
 
     if (!isCliente && !data?.length) {
-      throw new ForbiddenException('Sin acceso a los candidatos de esta solicitud');
+      throw new ForbiddenException(
+        'Sin acceso a los candidatos de esta solicitud',
+      );
     }
 
     return { candidatos: data ?? [] };
@@ -621,7 +696,9 @@ export class SolicitudesService {
       throw new ForbiddenException('Sin acceso a esta solicitud');
     }
     if (solicitud.urgencia !== 'programado') {
-      throw new BadRequestException('Esta solicitud no usa el flujo de postulación');
+      throw new BadRequestException(
+        'Esta solicitud no usa el flujo de postulación',
+      );
     }
 
     const { data: candidato } = await supabase
@@ -642,7 +719,9 @@ export class SolicitudesService {
       .single();
 
     if (!prestadorEstado?.esta_verificado || !prestadorEstado?.disponible) {
-      throw new ConflictException('Este técnico ya no está disponible. Elegí otro candidato.');
+      throw new ConflictException(
+        'Este técnico ya no está disponible. Elegí otro candidato.',
+      );
     }
 
     const { data: updated, error } = await supabase
@@ -687,7 +766,9 @@ export class SolicitudesService {
       { solicitudId, estado: 'aceptado' },
     );
 
-    const descartadoIds = (descartados ?? []).map((d: any) => d.prestador_id).filter(Boolean);
+    const descartadoIds = (descartados ?? [])
+      .map((d: any) => d.prestador_id)
+      .filter(Boolean);
     if (descartadoIds.length) {
       void this.notificationsService.notifyUsers(
         descartadoIds,
@@ -698,7 +779,9 @@ export class SolicitudesService {
       );
     }
 
-    this.logger.log(`Solicitud ${solicitudId}: candidato ${candidatoId} elegido por cliente ${clienteId}`);
+    this.logger.log(
+      `Solicitud ${solicitudId}: candidato ${candidatoId} elegido por cliente ${clienteId}`,
+    );
     return { solicitud: updated };
   }
 
@@ -709,17 +792,21 @@ export class SolicitudesService {
 
     const { data: candidaturas, error } = await supabase
       .from('solicitud_candidatos')
-      .select('id, estado, created_at, solicitud_id, solicitudes_trabajo(*, rubros(id, nombre, icono))')
+      .select(
+        'id, estado, created_at, solicitud_id, solicitudes_trabajo(*, rubros(id, nombre, icono))',
+      )
       .eq('prestador_id', prestadorId)
       .eq('estado', 'postulado')
       .order('created_at', { ascending: false });
 
-    if (error) throw new BadRequestException('Error obteniendo tus postulaciones');
+    if (error)
+      throw new BadRequestException('Error obteniendo tus postulaciones');
 
     // Si la solicitud padre ya no está "buscando" (se canceló, venció el timeout, etc.)
     // sin que se haya actualizado el estado del candidato, la postulación ya no es válida.
     const activas = (candidaturas ?? []).filter(
-      (c: any) => c.solicitudes_trabajo && c.solicitudes_trabajo.estado === 'buscando',
+      (c: any) =>
+        c.solicitudes_trabajo && c.solicitudes_trabajo.estado === 'buscando',
     );
     const candidatoIds = activas.map((c: any) => c.id);
 
@@ -732,10 +819,13 @@ export class SolicitudesService {
         .eq('read', false)
         .neq('sender_id', prestadorId);
 
-      noLeidosPorCandidato = (noLeidos ?? []).reduce((acc: Record<string, number>, m: any) => {
-        acc[m.candidato_id] = (acc[m.candidato_id] ?? 0) + 1;
-        return acc;
-      }, {});
+      noLeidosPorCandidato = (noLeidos ?? []).reduce(
+        (acc: Record<string, number>, m: any) => {
+          acc[m.candidato_id] = (acc[m.candidato_id] ?? 0) + 1;
+          return acc;
+        },
+        {},
+      );
     }
 
     return {
@@ -763,7 +853,8 @@ export class SolicitudesService {
       .eq('id', id)
       .single();
 
-    if (fetchError || !solicitud) throw new NotFoundException('Solicitud no encontrada');
+    if (fetchError || !solicitud)
+      throw new NotFoundException('Solicitud no encontrada');
 
     const isCliente = solicitud.cliente_id === userId;
     const isPrestador = solicitud.prestador_id === userId;
@@ -774,10 +865,14 @@ export class SolicitudesService {
 
     // Reglas por rol
     if (
-      (dto.estado === 'en_camino' || dto.estado === 'en_trabajo' || dto.estado === 'finalizado') &&
+      (dto.estado === 'en_camino' ||
+        dto.estado === 'en_trabajo' ||
+        dto.estado === 'finalizado') &&
       !isPrestador
     ) {
-      throw new ForbiddenException('Solo el prestador asignado puede actualizar a este estado');
+      throw new ForbiddenException(
+        'Solo el prestador asignado puede actualizar a este estado',
+      );
     }
     if (dto.estado === 'cerrado' && !isCliente) {
       throw new ForbiddenException('Solo el cliente puede cerrar la solicitud');
@@ -804,19 +899,25 @@ export class SolicitudesService {
       .update({ estado: dto.estado })
       .eq('id', id)
       .eq('estado', current)
-      .select('*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)')
+      .select(
+        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)',
+      )
       .single();
 
     if (error) {
       if (error.code === 'PGRST116') {
-        throw new ConflictException('Estado modificado por otro proceso. Reintentá.');
+        throw new ConflictException(
+          'Estado modificado por otro proceso. Reintentá.',
+        );
       }
       throw new BadRequestException('Error actualizando estado');
     }
 
     // Evidencias: poner fecha de expiración a los 3 días si finalizado
     if (dto.estado === 'finalizado') {
-      const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      const expiresAt = new Date(
+        Date.now() + 3 * 24 * 60 * 60 * 1000,
+      ).toISOString();
       await supabase
         .from('evidencias')
         .update({ expires_at: expiresAt })
@@ -839,7 +940,9 @@ export class SolicitudesService {
     }
 
     // Notificar a la contraparte
-    const notifyTarget = isPrestador ? solicitud.cliente_id : solicitud.prestador_id;
+    const notifyTarget = isPrestador
+      ? solicitud.cliente_id
+      : solicitud.prestador_id;
     if (notifyTarget) {
       const messages: Record<string, { title: string; body: string }> = {
         en_camino: {
@@ -891,7 +994,9 @@ export class SolicitudesService {
       .single();
 
     if (profile?.rol !== 'cliente' && profile?.rol !== 'prestador') {
-      throw new ForbiddenException('Solo clientes o prestadores pueden cancelar solicitudes');
+      throw new ForbiddenException(
+        'Solo clientes o prestadores pueden cancelar solicitudes',
+      );
     }
     const isPrestador = profile.rol === 'prestador';
 
@@ -906,11 +1011,14 @@ export class SolicitudesService {
     const isOwner = isPrestador
       ? solicitud.prestador_id === userId
       : solicitud.cliente_id === userId;
-    if (!isOwner) throw new ForbiddenException('No tenés permiso sobre esta solicitud');
+    if (!isOwner)
+      throw new ForbiddenException('No tenés permiso sobre esta solicitud');
 
     // El prestador solo puede "cancelar" un trabajo que ya tiene aceptado —
     // en 'buscando' todavía no está asignado a nadie.
-    const estadosCancelables = isPrestador ? ['aceptado'] : ['buscando', 'aceptado'];
+    const estadosCancelables = isPrestador
+      ? ['aceptado']
+      : ['buscando', 'aceptado'];
     if (!estadosCancelables.includes(solicitud.estado)) {
       throw new BadRequestException(
         `Solo se puede cancelar en estado ${estadosCancelables.join(' o ')}. Estado actual: ${solicitud.estado}`,
@@ -925,7 +1033,8 @@ export class SolicitudesService {
         sumaStrike = true;
       } else if (solicitud.aceptado_at) {
         const horasTranscurridas =
-          (Date.now() - new Date(solicitud.aceptado_at).getTime()) / (1000 * 60 * 60);
+          (Date.now() - new Date(solicitud.aceptado_at).getTime()) /
+          (1000 * 60 * 60);
         sumaStrike = horasTranscurridas > 12;
       }
       // Sin aceptado_at (dato legacy) no se puede probar que pasaron +12hs — no se penaliza.
@@ -935,7 +1044,11 @@ export class SolicitudesService {
     const esProgramado = solicitud.urgencia === 'programado';
     let updatePayload: Record<string, any>;
     if (isPrestador) {
-      updatePayload = { estado: 'buscando', prestador_id: null, aceptado_at: null };
+      updatePayload = {
+        estado: 'buscando',
+        prestador_id: null,
+        aceptado_at: null,
+      };
       if (esProgramado) {
         // Reabrir el pool de candidatos: sin esto, candidatos_count ya maxeado
         // o el deadline ya vencido dejarían el trabajo inalcanzable para siempre.
@@ -944,7 +1057,9 @@ export class SolicitudesService {
           Date.now() + POSTULACION_DEADLINE_MINUTES * 60 * 1000,
         ).toISOString();
       } else {
-        updatePayload.timeout_at = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        updatePayload.timeout_at = new Date(
+          Date.now() + 10 * 60 * 1000,
+        ).toISOString();
       }
     } else {
       updatePayload = { estado: 'cancelado' };
@@ -955,7 +1070,9 @@ export class SolicitudesService {
       .update(updatePayload)
       .eq('id', solicitudId)
       .eq('estado', solicitud.estado);
-    query = isPrestador ? query.eq('prestador_id', userId) : query.eq('cliente_id', userId);
+    query = isPrestador
+      ? query.eq('prestador_id', userId)
+      : query.eq('cliente_id', userId);
 
     const { data: updated, error } = await query
       .select('id, estado, cliente_id, prestador_id')
@@ -967,8 +1084,12 @@ export class SolicitudesService {
       );
     }
     if (error) {
-      this.logger.error(`Error cancelando solicitud ${solicitudId}: ${error.message} (code: ${error.code})`);
-      throw new BadRequestException(`Error cancelando la solicitud: ${error.message}`);
+      this.logger.error(
+        `Error cancelando solicitud ${solicitudId}: ${error.message} (code: ${error.code})`,
+      );
+      throw new BadRequestException(
+        `Error cancelando la solicitud: ${error.message}`,
+      );
     }
 
     // Si cancela el prestador, se repone su disponibilidad (por si quedó en false
@@ -989,7 +1110,9 @@ export class SolicitudesService {
           .eq('solicitud_id', solicitudId)
           .eq('estado', 'postulado');
 
-        const candidatoIds = (candidatosActivos ?? []).map((c: any) => c.prestador_id).filter(Boolean);
+        const candidatoIds = (candidatosActivos ?? [])
+          .map((c: any) => c.prestador_id)
+          .filter(Boolean);
         if (candidatoIds.length) {
           void this.notificationsService.notifyUsers(
             candidatoIds,
@@ -1023,11 +1146,14 @@ export class SolicitudesService {
     let cuentaSuspendida = false;
     if (sumaStrike) {
       const serviceSupabase = this.supabaseService.getServiceClient();
-      const { data: strikeData, error: strikeError } = await serviceSupabase.rpc('increment_strikes', {
-        p_perfil_id: userId,
-      });
+      const { data: strikeData, error: strikeError } =
+        await serviceSupabase.rpc('increment_strikes', {
+          p_perfil_id: userId,
+        });
       if (strikeError) {
-        this.logger.error(`Error incrementando strikes de ${userId}: ${strikeError.message}`);
+        this.logger.error(
+          `Error incrementando strikes de ${userId}: ${strikeError.message}`,
+        );
       } else {
         strikeAplicado = true;
         const row = Array.isArray(strikeData) ? strikeData[0] : strikeData;
@@ -1037,13 +1163,17 @@ export class SolicitudesService {
         const motivo = esUrgente
           ? 'Cancelaste un trabajo urgente ya aceptado'
           : 'Cancelaste un trabajo no urgente más de 12hs después de aceptarlo';
-        const { error: historialError } = await serviceSupabase.from('strikes_historial').insert({
-          perfil_id: userId,
-          trabajo_id: solicitudId,
-          motivo,
-        });
+        const { error: historialError } = await serviceSupabase
+          .from('strikes_historial')
+          .insert({
+            perfil_id: userId,
+            trabajo_id: solicitudId,
+            motivo,
+          });
         if (historialError) {
-          this.logger.error(`Error guardando historial de strike de ${userId}: ${historialError.message}`);
+          this.logger.error(
+            `Error guardando historial de strike de ${userId}: ${historialError.message}`,
+          );
         }
 
         if (cuentaSuspendida) {
@@ -1064,7 +1194,11 @@ export class SolicitudesService {
     this.logger.log(
       `Solicitud ${solicitudId} cancelada por ${profile.rol} ${userId}${sumaStrike ? ' (con strike)' : ''}`,
     );
-    return { solicitud: updated, strike_aplicado: strikeAplicado, cuenta_suspendida: cuentaSuspendida };
+    return {
+      solicitud: updated,
+      strike_aplicado: strikeAplicado,
+      cuenta_suspendida: cuentaSuspendida,
+    };
   }
 
   // ─── HELPERS ──────────────────────────────────────────────────────────────
@@ -1092,7 +1226,9 @@ export class SolicitudesService {
     if (!value) throw new BadRequestException('Coordenadas requeridas');
     const parts = value.split(',').map((p) => Number(p.trim()));
     if (parts.length !== 2 || parts.some(Number.isNaN)) {
-      throw new BadRequestException('Formato de coordenadas inválido. Usar "lon,lat"');
+      throw new BadRequestException(
+        'Formato de coordenadas inválido. Usar "lon,lat"',
+      );
     }
     return { lon: parts[0], lat: parts[1] };
   }
@@ -1101,7 +1237,8 @@ export class SolicitudesService {
     if (!value) return null;
     if (typeof value === 'object' && Array.isArray(value.coordinates)) {
       const [lon, lat] = value.coordinates;
-      if (!Number.isNaN(lon) && !Number.isNaN(lat)) return { lon: Number(lon), lat: Number(lat) };
+      if (!Number.isNaN(lon) && !Number.isNaN(lat))
+        return { lon: Number(lon), lat: Number(lat) };
     }
     const str = String(value);
     const m = str.match(/POINT\((-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/i);

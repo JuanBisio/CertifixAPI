@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateRatingDto } from './dto/create-rating.dto';
 
@@ -8,7 +13,11 @@ export class RatingsService {
 
   constructor(private supabaseService: SupabaseService) {}
 
-  async createRating(clienteId: string, dto: CreateRatingDto, accessToken: string) {
+  async createRating(
+    clienteId: string,
+    dto: CreateRatingDto,
+    accessToken: string,
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
     // Verificar que la solicitud pertenece al cliente y está cerrada
@@ -23,11 +32,15 @@ export class RatingsService {
     }
 
     if (solicitud.cliente_id !== clienteId) {
-      throw new ForbiddenException('No podés calificar una solicitud que no es tuya');
+      throw new ForbiddenException(
+        'No podés calificar una solicitud que no es tuya',
+      );
     }
 
     if (solicitud.estado !== 'cerrado') {
-      throw new BadRequestException('Solo se pueden calificar solicitudes en estado cerrado');
+      throw new BadRequestException(
+        'Solo se pueden calificar solicitudes en estado cerrado',
+      );
     }
 
     if (!solicitud.prestador_id) {
@@ -63,7 +76,9 @@ export class RatingsService {
       .single();
 
     if (insertError) {
-      this.logger.error(`Error insertando calificación: ${insertError.message}`);
+      this.logger.error(
+        `Error insertando calificación: ${insertError.message}`,
+      );
       throw new BadRequestException('Error guardando la calificación');
     }
 
@@ -80,7 +95,11 @@ export class RatingsService {
     return { rating };
   }
 
-  async createRatingCliente(prestadorId: string, dto: CreateRatingDto, accessToken: string) {
+  async createRatingCliente(
+    prestadorId: string,
+    dto: CreateRatingDto,
+    accessToken: string,
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
     const { data: solicitud, error: solError } = await supabase
@@ -94,11 +113,15 @@ export class RatingsService {
     }
 
     if (solicitud.prestador_id !== prestadorId) {
-      throw new ForbiddenException('No podés calificar una solicitud que no es tuya');
+      throw new ForbiddenException(
+        'No podés calificar una solicitud que no es tuya',
+      );
     }
 
     if (!['finalizado', 'cerrado'].includes(solicitud.estado)) {
-      throw new BadRequestException('Solo se puede calificar al cliente en estado finalizado o cerrado');
+      throw new BadRequestException(
+        'Solo se puede calificar al cliente en estado finalizado o cerrado',
+      );
     }
 
     const { data: existing } = await supabase
@@ -108,7 +131,9 @@ export class RatingsService {
       .single();
 
     if (existing) {
-      throw new BadRequestException('Ya calificaste al cliente de esta solicitud');
+      throw new BadRequestException(
+        'Ya calificaste al cliente de esta solicitud',
+      );
     }
 
     const { data: rating, error: insertError } = await supabase
@@ -124,7 +149,9 @@ export class RatingsService {
       .single();
 
     if (insertError) {
-      this.logger.error(`Error insertando calificación de cliente: ${insertError.message}`);
+      this.logger.error(
+        `Error insertando calificación de cliente: ${insertError.message}`,
+      );
       throw new BadRequestException('Error guardando la calificación');
     }
 
@@ -157,7 +184,11 @@ export class RatingsService {
     const promedio = (values: Array<number | null | undefined>) => {
       const validos = values.filter((v): v is number => v != null);
       if (!validos.length) return null;
-      return Math.round((validos.reduce((sum, v) => sum + v, 0) / validos.length) * 100) / 100;
+      return (
+        Math.round(
+          (validos.reduce((sum, v) => sum + v, 0) / validos.length) * 100,
+        ) / 100
+      );
     };
 
     const promedios = {
@@ -177,18 +208,26 @@ export class RatingsService {
 
     const { data, error } = await supabase
       .from('calificaciones_cliente')
-      .select('puntuacion, comentario, created_at, prestador:prestador_id(nombre)')
+      .select(
+        'puntuacion, comentario, created_at, prestador:prestador_id(nombre)',
+      )
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false });
 
     if (error) {
-      this.logger.error(`Error obteniendo ratings de cliente: ${error.message}`);
+      this.logger.error(
+        `Error obteniendo ratings de cliente: ${error.message}`,
+      );
       throw new BadRequestException('Error obteniendo calificaciones');
     }
 
     const ratings = data ?? [];
     const promedio = ratings.length
-      ? Math.round((ratings.reduce((sum, r: any) => sum + r.puntuacion, 0) / ratings.length) * 100) / 100
+      ? Math.round(
+          (ratings.reduce((sum, r: any) => sum + r.puntuacion, 0) /
+            ratings.length) *
+            100,
+        ) / 100
       : null;
 
     return { ratings, promedio };

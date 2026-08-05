@@ -61,7 +61,9 @@ export class EvidenciasService {
           .eq('es_reclamo', true);
 
         if (typeof count === 'number' && count >= 3) {
-          throw new BadRequestException('Máximo 3 fotos por reclamo (3MB c/u).');
+          throw new BadRequestException(
+            'Máximo 3 fotos por reclamo (3MB c/u).',
+          );
         }
       }
 
@@ -82,7 +84,9 @@ export class EvidenciasService {
 
       if (uploadError) {
         this.logger.error(`File upload failed: ${uploadError.message}`);
-        throw new BadRequestException('File upload failed: ' + uploadError.message);
+        throw new BadRequestException(
+          'File upload failed: ' + uploadError.message,
+        );
       }
 
       // Generar signed URL (válida 1 hora) — funciona tanto con bucket público como privado
@@ -92,7 +96,9 @@ export class EvidenciasService {
         .createSignedUrl(storagePath, 60 * 60);
 
       if (signedError) {
-        this.logger.warn(`No se pudo generar signed URL: ${signedError.message}`);
+        this.logger.warn(
+          `No se pudo generar signed URL: ${signedError.message}`,
+        );
       }
 
       const fileUrl = signedData?.signedUrl ?? storagePath;
@@ -118,7 +124,9 @@ export class EvidenciasService {
         throw new BadRequestException('Failed to save evidence record');
       }
 
-      this.logger.log(`Evidence uploaded for trabajo: ${createEvidenciaDto.trabajo_id}`);
+      this.logger.log(
+        `Evidence uploaded for trabajo: ${createEvidenciaDto.trabajo_id}`,
+      );
       // Devolver la signed URL en la respuesta inmediata
       return { evidencia: { ...data, url: fileUrl, url_archivo: fileUrl } };
     } catch (error) {
@@ -133,11 +141,7 @@ export class EvidenciasService {
     }
   }
 
-  async findByTrabajo(
-    trabajoId: string,
-    userId: string,
-    accessToken: string,
-  ) {
+  async findByTrabajo(trabajoId: string, userId: string, accessToken: string) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
     const nowIso = new Date().toISOString();
 
@@ -157,7 +161,10 @@ export class EvidenciasService {
         throw new ForbiddenException('Access denied to this work request');
       }
 
-      const evidenciasConUrl = await this.getEvidenciasConUrlsByTrabajo(trabajoId, nowIso);
+      const evidenciasConUrl = await this.getEvidenciasConUrlsByTrabajo(
+        trabajoId,
+        nowIso,
+      );
 
       return { evidencias: evidenciasConUrl };
     } catch (error) {
@@ -177,7 +184,10 @@ export class EvidenciasService {
    * SIN chequeo de pertenencia (cliente/prestador). Reutilizado por findByTrabajo
    * (tras validar pertenencia) y por AdminService (bypass explícito, admin).
    */
-  async getEvidenciasConUrlsByTrabajo(trabajoId: string, nowIso: string = new Date().toISOString()) {
+  async getEvidenciasConUrlsByTrabajo(
+    trabajoId: string,
+    nowIso: string = new Date().toISOString(),
+  ) {
     const supabase = this.supabaseService.getServiceClient();
 
     const { data, error } = await supabase
@@ -201,7 +211,8 @@ export class EvidenciasService {
         if (!path) return ev;
         // Si el campo contiene una URL completa (datos previos al cambio), extraer el path
         const storagePath = path.startsWith('http')
-          ? path.split(`/object/public/${this.BUCKET}/`)[1] ?? path.split(`/object/sign/${this.BUCKET}/`)[1]
+          ? (path.split(`/object/public/${this.BUCKET}/`)[1] ??
+            path.split(`/object/sign/${this.BUCKET}/`)[1])
           : path;
         if (!storagePath) return ev;
         const { data: s } = await supabase.storage

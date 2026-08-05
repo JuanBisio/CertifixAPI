@@ -53,7 +53,8 @@ export class CreateSolicitudDto {
   @ApiPropertyOptional({
     enum: FranjaHoraria,
     isArray: true,
-    description: 'Una o más franjas preferidas (requerido si urgencia = programado)',
+    description:
+      'Una o más franjas preferidas (requerido si urgencia = programado)',
   })
   @IsOptional()
   @IsArray()
@@ -76,11 +77,17 @@ export class CreateSolicitudDto {
   @IsString()
   zona_nombre: string;
 
-  @ApiProperty({ example: '-58.3816,-34.6037', description: 'lon,lat exactas (privadas)' })
+  @ApiProperty({
+    example: '-58.3816,-34.6037',
+    description: 'lon,lat exactas (privadas)',
+  })
   @IsString()
   coordenadas_privadas: string;
 
-  @ApiPropertyOptional({ example: '-58.38,-34.60', description: 'lon,lat aproximadas (~500m offset)' })
+  @ApiPropertyOptional({
+    example: '-58.38,-34.60',
+    description: 'lon,lat aproximadas (~500m offset)',
+  })
   @IsOptional()
   @IsString()
   coordenadas_publicas?: string;

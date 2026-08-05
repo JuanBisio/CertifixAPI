@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { SaveCardDto, PaymentMethodResponseDto } from './dto/cards.dto';
@@ -15,8 +20,12 @@ export class CardsService {
     private readonly supabaseService: SupabaseService,
     private readonly configService: ConfigService,
   ) {
-    const accessToken = this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN');
-    this.mercadopago = new MercadoPagoConfig({ accessToken: accessToken || '' });
+    const accessToken = this.configService.get<string>(
+      'MERCADOPAGO_ACCESS_TOKEN',
+    );
+    this.mercadopago = new MercadoPagoConfig({
+      accessToken: accessToken || '',
+    });
     this.customerClient = new Customer(this.mercadopago);
     this.paymentClient = new Payment(this.mercadopago);
   }
@@ -24,7 +33,10 @@ export class CardsService {
   /**
    * Gets or creates a MercadoPago customer for the user.
    */
-  private async getOrCreateCustomer(userId: string, email: string): Promise<string> {
+  private async getOrCreateCustomer(
+    userId: string,
+    email: string,
+  ): Promise<string> {
     const supabase = this.supabaseService.getServiceClient();
 
     // Check if user already has a customer ID stored
@@ -60,7 +72,10 @@ export class CardsService {
   /**
    * Saves a card for future payments.
    */
-  async saveCard(dto: SaveCardDto, userId: string): Promise<PaymentMethodResponseDto> {
+  async saveCard(
+    dto: SaveCardDto,
+    userId: string,
+  ): Promise<PaymentMethodResponseDto> {
     const supabase = this.supabaseService.getServiceClient();
 
     try {
@@ -135,7 +150,10 @@ export class CardsService {
   /**
    * Deletes a saved card.
    */
-  async deleteCard(cardId: string, userId: string): Promise<{ success: boolean }> {
+  async deleteCard(
+    cardId: string,
+    userId: string,
+  ): Promise<{ success: boolean }> {
     const supabase = this.supabaseService.getServiceClient();
 
     const { data: card, error: fetchError } = await supabase
@@ -151,7 +169,9 @@ export class CardsService {
 
     // Delete from MercadoPago using REST API (SDK doesn't have deleteCard)
     try {
-      const accessToken = this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN');
+      const accessToken = this.configService.get<string>(
+        'MERCADOPAGO_ACCESS_TOKEN',
+      );
       await fetch(
         `https://api.mercadopago.com/v1/customers/${card.mp_customer_id}/cards/${card.mp_card_id}`,
         {
@@ -159,7 +179,7 @@ export class CardsService {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        }
+        },
       );
     } catch (err: any) {
       this.logger.warn(`Failed to delete card from MP: ${err.message}`);
@@ -182,7 +202,10 @@ export class CardsService {
   /**
    * Sets a card as default.
    */
-  async setDefaultCard(cardId: string, userId: string): Promise<{ success: boolean }> {
+  async setDefaultCard(
+    cardId: string,
+    userId: string,
+  ): Promise<{ success: boolean }> {
     const supabase = this.supabaseService.getServiceClient();
 
     // Unset all defaults
@@ -210,7 +233,9 @@ export class CardsService {
    */
   private async generateCardToken(cardId: string): Promise<string> {
     try {
-      const mpAccessToken = this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN');
+      const mpAccessToken = this.configService.get<string>(
+        'MERCADOPAGO_ACCESS_TOKEN',
+      );
       // We use fetch since the Node SDK might not expose this specific endpoint easily for saved cards
       const response = await fetch(
         `https://api.mercadopago.com/v1/card_tokens?public_key=${this.configService.get('MERCADOPAGO_PUBLIC_KEY')}`,
@@ -218,21 +243,25 @@ export class CardsService {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${mpAccessToken}`
+            Authorization: `Bearer ${mpAccessToken}`,
           },
-          body: JSON.stringify({ card_id: cardId })
-        }
+          body: JSON.stringify({ card_id: cardId }),
+        },
       );
 
       const data = await response.json();
 
       if (!response.ok || !data.id) {
-        throw new Error(data.message || 'Could not generate token for saved card');
+        throw new Error(
+          data.message || 'Could not generate token for saved card',
+        );
       }
 
       return data.id;
     } catch (error) {
-      this.logger.error(`Error generating token for saved card: ${error.message}`);
+      this.logger.error(
+        `Error generating token for saved card: ${error.message}`,
+      );
       throw new BadRequestException('Failed to process saved card');
     }
   }
@@ -246,7 +275,12 @@ export class CardsService {
     userId: string,
     amount: number,
     description: string,
-  ): Promise<{ success: boolean; provider_transaction_id?: string; status: 'completed' | 'failed'; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    provider_transaction_id?: string;
+    status: 'completed' | 'failed';
+    error?: string;
+  }> {
     const supabase = this.supabaseService.getServiceClient();
 
     const { data: savedCard, error: cardError } = await supabase

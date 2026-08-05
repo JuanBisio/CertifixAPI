@@ -10,14 +10,23 @@ export class NotificationsService {
 
   constructor(private supabaseService: SupabaseService) {}
 
-  async registerToken(userId: string, dto: RegisterTokenDto, accessToken: string) {
+  async registerToken(
+    userId: string,
+    dto: RegisterTokenDto,
+    accessToken: string,
+  ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
     const now = new Date().toISOString();
 
     const { error } = await supabase
       .from('expo_push_tokens')
       .upsert(
-        { user_id: userId, expo_push_token: dto.expo_push_token, updated_at: now, created_at: now },
+        {
+          user_id: userId,
+          expo_push_token: dto.expo_push_token,
+          updated_at: now,
+          created_at: now,
+        },
         { onConflict: 'user_id', ignoreDuplicates: false },
       )
       .select('id')
@@ -55,7 +64,9 @@ export class NotificationsService {
       .map((t: any) => t.expo_push_token)
       .filter(this.isExpoToken);
 
-    await this.sendPush(valid.map((to: string) => ({ to, title, body, data: data ?? {} })));
+    await this.sendPush(
+      valid.map((to: string) => ({ to, title, body, data: data ?? {} })),
+    );
   }
 
   // Notifica a prestadores que coinciden por rubro Y radio PostGIS (función RPC en Supabase)
@@ -75,21 +86,33 @@ export class NotificationsService {
     );
 
     if (error) {
-      this.logger.error(`Error en RPC get_prestadores_para_solicitud: ${error.message}`);
+      this.logger.error(
+        `Error en RPC get_prestadores_para_solicitud: ${error.message}`,
+      );
       // Fallback: notificar por rubro sin filtro geográfico si la función no existe aún
       await this.notifyPrestadoresFallback(rubroId, accessToken, payload);
       return;
     }
 
-    const userIds = (prestadores ?? []).map((p: any) => p.user_id).filter(Boolean);
+    const userIds = (prestadores ?? [])
+      .map((p: any) => p.user_id)
+      .filter(Boolean);
 
     if (!userIds.length) {
       this.logger.log('Sin prestadores disponibles en el área para notificar');
       return;
     }
 
-    await this.notifyUsers(userIds, payload.title, payload.body, accessToken, payload.data);
-    this.logger.log(`Push enviado a ${userIds.length} prestadores para rubro ${rubroId}`);
+    await this.notifyUsers(
+      userIds,
+      payload.title,
+      payload.body,
+      accessToken,
+      payload.data,
+    );
+    this.logger.log(
+      `Push enviado a ${userIds.length} prestadores para rubro ${rubroId}`,
+    );
   }
 
   // Fallback: match solo por rubro (sin PostGIS) — usado durante migración
@@ -115,19 +138,32 @@ export class NotificationsService {
       .in('id', prestadorIds)
       .eq('disponible', true)
       .eq('esta_verificado', true)
-      .or(`suscripcion_activa.eq.true,trabajos_gratis_usados.lt.${TRABAJOS_GRATIS_LIMITE}`);
+      .or(
+        `suscripcion_activa.eq.true,trabajos_gratis_usados.lt.${TRABAJOS_GRATIS_LIMITE}`,
+      );
 
     const userIds = (disponibles ?? []).map((p: any) => p.id);
     if (!userIds.length) return;
 
-    await this.notifyUsers(userIds, payload.title, payload.body, accessToken, payload.data);
+    await this.notifyUsers(
+      userIds,
+      payload.title,
+      payload.body,
+      accessToken,
+      payload.data,
+    );
   }
 
   private readonly maxPushAttempts = 3;
   private readonly pushRetryBaseDelayMs = 500;
 
   private async sendPush(
-    messages: Array<{ to: string; title: string; body: string; data?: Record<string, any> }>,
+    messages: Array<{
+      to: string;
+      title: string;
+      body: string;
+      data?: Record<string, any>;
+    }>,
   ) {
     if (!messages.length) return;
 
@@ -143,7 +179,9 @@ export class NotificationsService {
         // vale la pena reintentar fallas transitorias (red, 5xx de Expo).
         if (!response.ok) {
           if (response.status < 500 || attempt === this.maxPushAttempts) {
-            this.logger.error(`Expo push falló: ${response.status} (intento ${attempt})`);
+            this.logger.error(
+              `Expo push falló: ${response.status} (intento ${attempt})`,
+            );
             return;
           }
           throw new Error(`Expo respondió ${response.status}`);
@@ -153,16 +191,21 @@ export class NotificationsService {
           data?: Array<{ status: string; message?: string }>;
         };
         result?.data?.forEach((r) => {
-          if (r.status !== 'ok') this.logger.warn(`Expo push no-ok: ${r.message}`);
+          if (r.status !== 'ok')
+            this.logger.warn(`Expo push no-ok: ${r.message}`);
         });
         return;
       } catch (err: any) {
         if (attempt === this.maxPushAttempts) {
-          this.logger.error(`sendPush error tras ${attempt} intentos: ${err.message}`);
+          this.logger.error(
+            `sendPush error tras ${attempt} intentos: ${err.message}`,
+          );
           return;
         }
         const delay = this.pushRetryBaseDelayMs * 2 ** (attempt - 1);
-        this.logger.warn(`sendPush intento ${attempt} falló (${err.message}), reintentando en ${delay}ms`);
+        this.logger.warn(
+          `sendPush intento ${attempt} falló (${err.message}), reintentando en ${delay}ms`,
+        );
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }

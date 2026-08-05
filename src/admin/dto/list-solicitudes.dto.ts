@@ -2,7 +2,15 @@ import { IsOptional, IsIn, IsString, IsDateString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 
-const ESTADOS = ['buscando', 'aceptado', 'en_camino', 'en_trabajo', 'finalizado', 'cerrado', 'cancelado'] as const;
+const ESTADOS = [
+  'buscando',
+  'aceptado',
+  'en_camino',
+  'en_trabajo',
+  'finalizado',
+  'cerrado',
+  'cancelado',
+] as const;
 
 export class ListSolicitudesQuery extends PaginationDto {
   @IsOptional()

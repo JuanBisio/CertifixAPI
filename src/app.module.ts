@@ -14,6 +14,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { CardsModule } from './cards/cards.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { RatingsModule } from './ratings/ratings.module';
+import { RevocacionesModule } from './revocaciones/revocaciones.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AdminModule } from './admin/admin.module';
 import { WelcomeController } from './welcome.controller';
@@ -45,6 +46,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     CardsModule,
     SubscriptionsModule,
     RatingsModule,
+    RevocacionesModule,
     AdminModule,
   ],
   controllers: [WelcomeController],

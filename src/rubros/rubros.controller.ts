@@ -1,5 +1,20 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  UseGuards,
+  Logger,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { RubrosService } from './rubros.service';
 import { CreateRubroDto } from './dto/create-rubro.dto';
 import { UpdateRubroDto } from './dto/update-rubro.dto';
@@ -56,9 +71,14 @@ export class RubrosController {
   @Delete(':id')
   @UseGuards(SupabaseAuthGuard, AdminGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Borrar un rubro (solo admin, falla si está en uso)' })
+  @ApiOperation({
+    summary: 'Borrar un rubro (solo admin, falla si está en uso)',
+  })
   @ApiResponse({ status: 200 })
-  @ApiResponse({ status: 400, description: 'Rubro en uso por solicitudes o prestadores' })
+  @ApiResponse({
+    status: 400,
+    description: 'Rubro en uso por solicitudes o prestadores',
+  })
   async remove(@Param('id') id: string) {
     this.logger.log(`Eliminar rubro: ${id}`);
     return this.rubrosService.remove(id);

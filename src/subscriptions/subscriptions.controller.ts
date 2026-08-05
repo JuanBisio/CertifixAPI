@@ -1,6 +1,19 @@
-import { Controller, Get, Post, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
 import {
   SubscribeDto,
@@ -32,14 +45,19 @@ export class SubscriptionsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Historial de pagos de suscripción del prestador' })
   @ApiResponse({ status: 200, type: [SubscriptionPaymentDto] })
-  async getHistory(@CurrentUser() user: User): Promise<SubscriptionPaymentDto[]> {
+  async getHistory(
+    @CurrentUser() user: User,
+  ): Promise<SubscriptionPaymentDto[]> {
     return this.subscriptionsService.getHistory(user.id);
   }
 
   @Post('subscribe')
   @UseGuards(SupabaseAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Suscribirse (o cambiar el método de pago de la suscripción activa)' })
+  @ApiOperation({
+    summary:
+      'Suscribirse (o cambiar el método de pago de la suscripción activa)',
+  })
   @ApiResponse({ status: 201, type: SubscribeResponseDto })
   async subscribe(
     @Body() dto: SubscribeDto,
@@ -59,8 +77,12 @@ export class SubscriptionsController {
   @Post('webhook')
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Webhook de notificaciones de MercadoPago (Preapproval)' })
-  async webhook(@Body() dto: PreapprovalWebhookDto): Promise<{ success: boolean }> {
+  @ApiOperation({
+    summary: 'Webhook de notificaciones de MercadoPago (Preapproval)',
+  })
+  async webhook(
+    @Body() dto: PreapprovalWebhookDto,
+  ): Promise<{ success: boolean }> {
     return this.subscriptionsService.handleWebhook(dto);
   }
 }

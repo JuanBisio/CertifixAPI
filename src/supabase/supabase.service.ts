@@ -12,15 +12,18 @@ export class SupabaseService {
   constructor(private configService: ConfigService) {
     const supabaseUrl = this.configService.get<string>('SUPABASE_URL');
     const supabaseKey = this.configService.get<string>('SUPABASE_ANON_KEY');
-    const serviceRoleKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+    const serviceRoleKey = this.configService.get<string>(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
 
     if (!supabaseUrl || !supabaseKey) {
       throw new Error('Missing Supabase credentials in environment variables');
     }
 
-    this.logger.log(`Service role key loaded: ${serviceRoleKey ? 'yes' : 'no'}`);
+    this.logger.log(
+      `Service role key loaded: ${serviceRoleKey ? 'yes' : 'no'}`,
+    );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const realtimeOpts = { transport: WebSocket as any };
     this.supabase = createClient(supabaseUrl, supabaseKey, {
       realtime: realtimeOpts,
@@ -36,7 +39,9 @@ export class SupabaseService {
       this.logger.log('Supabase service-role client initialized');
     } else {
       // Throw error to debug if key is not being loaded
-      throw new Error('CRITICAL: SUPABASE_SERVICE_ROLE_KEY is missing. Backend cannot bypass RLS.');
+      throw new Error(
+        'CRITICAL: SUPABASE_SERVICE_ROLE_KEY is missing. Backend cannot bypass RLS.',
+      );
     }
     this.logger.log('Supabase client initialized');
   }
@@ -54,7 +59,7 @@ export class SupabaseService {
   getAuthenticatedClient(accessToken: string): SupabaseClient {
     const supabaseUrl = this.configService.get<string>('SUPABASE_URL')!;
     const supabaseKey = this.configService.get<string>('SUPABASE_ANON_KEY')!;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     return createClient(supabaseUrl, supabaseKey, {
       global: {
         headers: {
@@ -67,13 +72,16 @@ export class SupabaseService {
 
   async verifyToken(token: string): Promise<User | null> {
     try {
-      const { data: { user }, error } = await this.supabase.auth.getUser(token);
-      
+      const {
+        data: { user },
+        error,
+      } = await this.supabase.auth.getUser(token);
+
       if (error) {
         this.logger.error(`Token verification failed: ${error.message}`);
         return null;
       }
-      
+
       return user;
     } catch (error) {
       this.logger.error(`Token verification error: ${error.message}`);

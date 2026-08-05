@@ -26,8 +26,12 @@ export class SubscriptionsService {
     private readonly supabaseService: SupabaseService,
     private readonly configService: ConfigService,
   ) {
-    const accessToken = this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN');
-    const mercadopago = new MercadoPagoConfig({ accessToken: accessToken || '' });
+    const accessToken = this.configService.get<string>(
+      'MERCADOPAGO_ACCESS_TOKEN',
+    );
+    const mercadopago = new MercadoPagoConfig({
+      accessToken: accessToken || '',
+    });
     this.preApproval = new PreApproval(mercadopago);
   }
 
@@ -36,7 +40,9 @@ export class SubscriptionsService {
 
     const { data, error } = await supabase
       .from('perfiles_prestadores')
-      .select('suscripcion_activa, suscripcion_cancelada, suscripcion_vence_at, suscripcion_card_last_four, suscripcion_card_brand, trabajos_gratis_usados')
+      .select(
+        'suscripcion_activa, suscripcion_cancelada, suscripcion_vence_at, suscripcion_card_last_four, suscripcion_card_brand, trabajos_gratis_usados',
+      )
       .eq('id', prestadorId)
       .single();
 
@@ -57,7 +63,8 @@ export class SubscriptionsService {
       card_last_four: data.suscripcion_card_last_four ?? undefined,
       card_brand: data.suscripcion_card_brand ?? undefined,
       trabajos_gratis_restantes: trabajosGratisRestantes,
-      puede_recibir_solicitudes: data.suscripcion_activa || trabajosGratisRestantes > 0,
+      puede_recibir_solicitudes:
+        data.suscripcion_activa || trabajosGratisRestantes > 0,
     };
   }
 
@@ -66,7 +73,9 @@ export class SubscriptionsService {
 
     const { data, error } = await supabase
       .from('suscripcion_pagos')
-      .select('id, amount, status, payment_method, period_start, period_end, created_at')
+      .select(
+        'id, amount, status, payment_method, period_start, period_end, created_at',
+      )
       .eq('prestador_id', prestadorId)
       .order('created_at', { ascending: false });
 
@@ -77,7 +86,11 @@ export class SubscriptionsService {
     return data || [];
   }
 
-  async subscribe(dto: SubscribeDto, prestadorId: string, email: string): Promise<SubscribeResponseDto> {
+  async subscribe(
+    dto: SubscribeDto,
+    prestadorId: string,
+    email: string,
+  ): Promise<SubscribeResponseDto> {
     const supabase = this.supabaseService.getServiceClient();
 
     const { data: prestador, error: fetchError } = await supabase
@@ -91,7 +104,9 @@ export class SubscriptionsService {
     }
 
     const periodStart = new Date();
-    const periodEnd = new Date(periodStart.getTime() + SUBSCRIPTION_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+    const periodEnd = new Date(
+      periodStart.getTime() + SUBSCRIPTION_PERIOD_DAYS * 24 * 60 * 60 * 1000,
+    );
 
     try {
       let preapprovalId = prestador.mp_preapproval_id as string | null;
@@ -149,32 +164,47 @@ export class SubscriptionsService {
         .eq('id', prestadorId);
 
       if (updateError) {
-        this.logger.error(`Failed to activate suscripcion: ${updateError.message}`);
-        throw new BadRequestException('La suscripción se creó en MercadoPago pero no se pudo activar localmente. Contactar soporte.');
+        this.logger.error(
+          `Failed to activate suscripcion: ${updateError.message}`,
+        );
+        throw new BadRequestException(
+          'La suscripción se creó en MercadoPago pero no se pudo activar localmente. Contactar soporte.',
+        );
       }
 
       if (isNewPreapproval) {
         // Registro optimista del primer pago — el webhook/cron reconcilia si MP tarda en confirmarlo.
-        const { error: paymentError } = await supabase.from('suscripcion_pagos').insert({
-          prestador_id: prestadorId,
-          mp_preapproval_id: preapprovalId,
-          amount: SUBSCRIPTION_AMOUNT,
-          status: 'completed',
-          payment_method: dto.card_brand,
-          period_start: periodStart.toISOString(),
-          period_end: periodEnd.toISOString(),
-        });
+        const { error: paymentError } = await supabase
+          .from('suscripcion_pagos')
+          .insert({
+            prestador_id: prestadorId,
+            mp_preapproval_id: preapprovalId,
+            amount: SUBSCRIPTION_AMOUNT,
+            status: 'completed',
+            payment_method: dto.card_brand,
+            period_start: periodStart.toISOString(),
+            period_end: periodEnd.toISOString(),
+          });
         if (paymentError) {
-          this.logger.error(`Error guardando el primer pago de suscripcion_pagos: ${paymentError.message}`);
+          this.logger.error(
+            `Error guardando el primer pago de suscripcion_pagos: ${paymentError.message}`,
+          );
         }
       }
 
-      this.logger.log(`Suscripción (preapproval ${preapprovalId}) activada para prestador ${prestadorId}`);
+      this.logger.log(
+        `Suscripción (preapproval ${preapprovalId}) activada para prestador ${prestadorId}`,
+      );
 
       return { success: true, vence_at: periodEnd.toISOString() };
     } catch (err: any) {
-      this.logger.error(`Error creando/actualizando preapproval: ${err.message}`);
-      return { success: false, error: err.message || 'No se pudo procesar la suscripción' };
+      this.logger.error(
+        `Error creando/actualizando preapproval: ${err.message}`,
+      );
+      return {
+        success: false,
+        error: err.message || 'No se pudo procesar la suscripción',
+      };
     }
   }
 
@@ -188,7 +218,9 @@ export class SubscriptionsService {
       .single();
 
     if (fetchError || !prestador?.mp_preapproval_id) {
-      throw new BadRequestException('No hay una suscripción activa para cancelar');
+      throw new BadRequestException(
+        'No hay una suscripción activa para cancelar',
+      );
     }
 
     await this.preApproval.update({
@@ -203,25 +235,35 @@ export class SubscriptionsService {
       .update({ suscripcion_cancelada: true })
       .eq('id', prestadorId);
 
-    this.logger.log(`Suscripción cancelada (preapproval ${prestador.mp_preapproval_id}) para prestador ${prestadorId}`);
+    this.logger.log(
+      `Suscripción cancelada (preapproval ${prestador.mp_preapproval_id}) para prestador ${prestadorId}`,
+    );
 
     return { success: true };
   }
 
-  async handleWebhook(dto: PreapprovalWebhookDto): Promise<{ success: boolean }> {
+  async handleWebhook(
+    dto: PreapprovalWebhookDto,
+  ): Promise<{ success: boolean }> {
     this.logger.log(`Webhook recibido: type=${dto.type} action=${dto.action}`);
 
     try {
       if (dto.type === 'subscription_preapproval' && dto.data?.id) {
         await this.syncPreapprovalStatus(dto.data.id);
-      } else if (dto.type === 'subscription_authorized_payment' && dto.data?.id) {
-        const preapprovalId = await this.resolvePreapprovalIdFromAuthorizedPayment(dto.data.id);
+      } else if (
+        dto.type === 'subscription_authorized_payment' &&
+        dto.data?.id
+      ) {
+        const preapprovalId =
+          await this.resolvePreapprovalIdFromAuthorizedPayment(dto.data.id);
         if (preapprovalId) {
           await this.syncPreapprovalStatus(preapprovalId);
         }
       }
     } catch (err: any) {
-      this.logger.error(`Error procesando webhook de suscripción: ${err.message}`);
+      this.logger.error(
+        `Error procesando webhook de suscripción: ${err.message}`,
+      );
     }
 
     return { success: true };
@@ -267,13 +309,17 @@ export class SubscriptionsService {
 
     if (chargedQuantity > knownQuantity) {
       const periodStart = new Date();
-      const periodEnd = new Date(periodStart.getTime() + SUBSCRIPTION_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+      const periodEnd = new Date(
+        periodStart.getTime() + SUBSCRIPTION_PERIOD_DAYS * 24 * 60 * 60 * 1000,
+      );
 
       for (let i = knownQuantity; i < chargedQuantity; i++) {
         await supabase.from('suscripcion_pagos').insert({
           prestador_id: prestadorId,
           mp_preapproval_id: preapprovalId,
-          amount: preapproval.auto_recurring?.transaction_amount ?? SUBSCRIPTION_AMOUNT,
+          amount:
+            preapproval.auto_recurring?.transaction_amount ??
+            SUBSCRIPTION_AMOUNT,
           status: 'completed',
           payment_method: preapproval.payment_method_id ?? null,
           period_start: periodStart.toISOString(),
@@ -288,25 +334,39 @@ export class SubscriptionsService {
       return;
     }
 
-    const { error } = await supabase.from('perfiles_prestadores').update(update).eq('id', prestadorId);
+    const { error } = await supabase
+      .from('perfiles_prestadores')
+      .update(update)
+      .eq('id', prestadorId);
 
     if (error) {
-      this.logger.error(`Error sincronizando preapproval ${preapprovalId}: ${error.message}`);
+      this.logger.error(
+        `Error sincronizando preapproval ${preapprovalId}: ${error.message}`,
+      );
     }
   }
 
-  private async resolvePreapprovalIdFromAuthorizedPayment(authorizedPaymentId: string): Promise<string | null> {
-    const accessToken = this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN');
+  private async resolvePreapprovalIdFromAuthorizedPayment(
+    authorizedPaymentId: string,
+  ): Promise<string | null> {
+    const accessToken = this.configService.get<string>(
+      'MERCADOPAGO_ACCESS_TOKEN',
+    );
 
     // La API de Preapproval no tiene cliente propio en el SDK para "authorized payments";
     // se consulta por REST directo (mismo patrón que generateCardToken en cards.service.ts).
-    const response = await fetch(`https://api.mercadopago.com/authorized_payments/${authorizedPaymentId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const response = await fetch(
+      `https://api.mercadopago.com/authorized_payments/${authorizedPaymentId}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
     const authorizedPayment = await response.json();
 
     if (!response.ok || !authorizedPayment.preapproval_id) {
-      this.logger.warn(`No se pudo obtener el authorized_payment ${authorizedPaymentId}`);
+      this.logger.warn(
+        `No se pudo obtener el authorized_payment ${authorizedPaymentId}`,
+      );
       return null;
     }
 
