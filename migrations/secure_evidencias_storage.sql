@@ -1,0 +1,45 @@
+-- Endurece la policy de SELECT de storage.objects para el bucket `evidencias`.
+-- Hallazgo (ROADMAP.md sección 3, hallazgo 2026-07-25, pendiente): el bucket
+-- ya es privado (2026-07-13), pero la policy de SELECT sobre storage.objects
+-- quedó abierta al rol `public` sin restricción de owner/path — la única
+-- protección real hoy es que los paths llevan un UUID no adivinable
+-- (`evidencias/<fecha>/<trabajo_id>/<uuid>.<ext>`,
+-- `solicitudes/<fecha>/<userId>/<uuid>.<ext>` para la foto del problema).
+--
+-- A diferencia de `documentos-prestadores` (paths con prefijo `${userId}/`),
+-- los objetos de `evidencias` no tienen el owner en el primer segmento del
+-- path — el owner real depende de a quién pertenece el `trabajo_id` (cliente
+-- o prestador asignado), algo que solo se puede resolver consultando la
+-- tabla `evidencias`/`solicitudes_trabajo`, no con storage.foldername(name).
+-- Y las lecturas de la app SIEMPRE pasan por signed URLs generadas
+-- server-side con el service client (EvidenciasService.getEvidenciasConUrlsByTrabajo,
+-- SolicitudesService — grep de `.storage.from('evidencias')` en src/ confirma
+-- que no hay ningún caller que lea directo con el cliente autenticado/anon).
+-- Por eso el fix, igual que en documentos-prestadores, es simplemente no
+-- darle SELECT a `authenticated`/`anon`/`public` — el service client bypassea
+-- RLS igual.
+--
+-- Confirmado contra Supabase real (vfeaoejqmvoeebzthxnw, 2026-09-03) con
+-- `select policyname, cmd, roles, qual from pg_policies where schemaname =
+-- 'storage' and tablename = 'objects' and qual::text ilike '%evidencias%'`
+-- — las 3 policies vigentes sobre storage.objects para este bucket son:
+--   "Lectura pública de evidencias"       SELECT  {public}        (bucket_id = 'evidencias')
+--   "Usuarios autenticados suben evidencias" INSERT {authenticated} (bucket_id = 'evidencias')
+--   "Borrado de evidencias"               DELETE  {authenticated}  (bucket_id = 'evidencias')
+-- Se reemplaza la de SELECT (el hallazgo) por ninguna policy — las lecturas
+-- pasan siempre por signed URLs generadas server-side con el service client.
+-- INSERT/DELETE quedan sin cambios: ya estaban correctamente scoped a
+-- `authenticated` (el backend sube/borra siempre bajo JWT de usuario o con
+-- el service client, que bypassea RLS en cualquier caso).
+DROP POLICY IF EXISTS "Lectura pública de evidencias" ON storage.objects;
+
+alter table storage.objects enable row level security; -- idempotente
+
+-- Sin policy de SELECT para authenticated/anon/public: a propósito. Las
+-- lecturas (signed URLs) pasan siempre por el service client
+-- (EvidenciasService.getEvidenciasConUrlsByTrabajo, AdminService,
+-- SolicitudesService), que bypassea RLS; el borrado de evidencias vencidas
+-- también corre con el service client (EvidenciasCleanupService). Esto
+-- cierra el vector real: hoy cualquiera con la anon key podía hacer SELECT
+-- directo contra `evidencias` sin depender del backend, protegido solo por
+-- lo no adivinable del UUID en el path.
