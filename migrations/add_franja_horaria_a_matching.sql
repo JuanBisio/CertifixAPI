@@ -69,3 +69,9 @@ AS $$
       )
     )
 $$;
+
+-- Sin esto, recrear la función deja el WARN de Advisors
+-- function_search_path_mutable (la función original, de v1_sprint1_schema.sql,
+-- nunca lo tuvo fijo — se corrige de paso al tocarla).
+ALTER FUNCTION get_prestadores_para_solicitud(TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT[])
+  SET search_path = public, pg_temp;

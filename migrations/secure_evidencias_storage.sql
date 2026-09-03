@@ -33,7 +33,12 @@
 -- el service client, que bypassea RLS en cualquier caso).
 DROP POLICY IF EXISTS "Lectura pública de evidencias" ON storage.objects;
 
-alter table storage.objects enable row level security; -- idempotente
+-- (No hace falta `ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY` —
+-- ya estaba habilitado, y el rol de la conexión de migraciones no es owner
+-- de esa tabla administrada por Supabase, así que ese ALTER falla con
+-- "must be owner of table objects" si se lo deja. Aplicada 2026-09-03 contra
+-- Supabase real solo con el DROP POLICY de arriba; confirmado con
+-- pg_policies que la policy pública ya no existe.)
 
 -- Sin policy de SELECT para authenticated/anon/public: a propósito. Las
 -- lecturas (signed URLs) pasan siempre por el service client
