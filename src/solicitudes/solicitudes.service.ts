@@ -156,6 +156,9 @@ export class SolicitudesService {
               estado: data.estado,
             },
           },
+      // HOR-02: solo el modo programado manda franja — el urgente no filtra
+      // por horario (es "ahora mismo", nunca undefined/null en ese caso).
+      esProgramado ? dto.franjas_horarias : null,
     );
 
     this.logger.log(`Solicitud creada: ${data.id}`);
