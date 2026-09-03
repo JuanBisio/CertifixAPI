@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateRatingDto } from './dto/create-rating.dto';
 
@@ -168,7 +169,7 @@ export class RatingsService {
     const { data, error } = await supabase
       .from('calificaciones')
       .select(
-        'puntuacion, comentario, created_at, comunicacion, puntualidad, atencion, eficiencia, clientes:cliente_id(nombre)',
+        'solicitud_id, puntuacion, comentario, created_at, comunicacion, puntualidad, atencion, eficiencia, clientes:cliente_id(nombre)',
       )
       .eq('prestador_id', prestadorId)
       .order('created_at', { ascending: false });
@@ -178,7 +179,15 @@ export class RatingsService {
       throw new BadRequestException('Error obteniendo calificaciones');
     }
 
-    const ratings = data ?? [];
+    // CAL-04: reseña cruzada ciega — una calificación queda oculta del
+    // listado público hasta que ambas partes calificaron esa misma
+    // solicitud, para que quien todavía no calificó no vea antes la reseña
+    // ajena y la use para condicionar la propia.
+    const ratings = await this.filtrarPorResenaCruzadaCompleta(
+      supabase,
+      data ?? [],
+      'calificaciones_cliente',
+    );
 
     // CAL-02: promedio por subcategoría, solo entre las reseñas que la completaron (son opcionales)
     const promedio = (values: Array<number | null | undefined>) => {
@@ -209,7 +218,7 @@ export class RatingsService {
     const { data, error } = await supabase
       .from('calificaciones_cliente')
       .select(
-        'puntuacion, comentario, created_at, prestador:prestador_id(nombre)',
+        'solicitud_id, puntuacion, comentario, created_at, prestador:prestador_id(nombre)',
       )
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false });
@@ -221,7 +230,13 @@ export class RatingsService {
       throw new BadRequestException('Error obteniendo calificaciones');
     }
 
-    const ratings = data ?? [];
+    // CAL-04: mismo criterio de reseña cruzada ciega que getRatingsPrestador,
+    // en el sentido inverso (la contraparte acá es `calificaciones`).
+    const ratings = await this.filtrarPorResenaCruzadaCompleta(
+      supabase,
+      data ?? [],
+      'calificaciones',
+    );
     const promedio = ratings.length
       ? Math.round(
           (ratings.reduce((sum, r: any) => sum + r.puntuacion, 0) /
@@ -231,5 +246,33 @@ export class RatingsService {
       : null;
 
     return { ratings, promedio };
+  }
+
+  // CAL-04: dado un listado de reseñas (cada una con solicitud_id), devuelve
+  // solo las que ya tienen su contraparte cargada en `contraparteTabla`
+  // (calificaciones ↔ calificaciones_cliente) — y les saca el solicitud_id,
+  // que era solo para este chequeo, no para exponerlo en la respuesta.
+  private async filtrarPorResenaCruzadaCompleta(
+    supabase: SupabaseClient,
+    rows: any[],
+    contraparteTabla: 'calificaciones' | 'calificaciones_cliente',
+  ) {
+    const solicitudIds = [
+      ...new Set(rows.map((r) => r.solicitud_id).filter(Boolean)),
+    ];
+    if (!solicitudIds.length) return [];
+
+    const { data: contrapartes } = await supabase
+      .from(contraparteTabla)
+      .select('solicitud_id')
+      .in('solicitud_id', solicitudIds);
+
+    const completas = new Set(
+      (contrapartes ?? []).map((c: any) => c.solicitud_id),
+    );
+
+    return rows
+      .filter((r) => completas.has(r.solicitud_id))
+      .map(({ solicitud_id, ...rest }) => rest);
   }
 }

@@ -76,13 +76,21 @@ export class NotificationsService {
     lat: number,
     accessToken: string,
     payload: { title: string; body: string; data?: Record<string, any> },
+    franjasHorarias?: string[] | null,
   ) {
     const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
 
-    // Llama a la función RPC que hace el match PostGIS + prestador_rubros
+    // Llama a la función RPC que hace el match PostGIS + prestador_rubros +
+    // franja horaria (HOR-02, solo aplica si la solicitud es programada y
+    // manda franjasHorarias — en urgente va undefined/null y no filtra nada).
     const { data: prestadores, error } = await supabase.rpc(
       'get_prestadores_para_solicitud',
-      { p_rubro_id: rubroId, p_lon: lon, p_lat: lat },
+      {
+        p_rubro_id: rubroId,
+        p_lon: lon,
+        p_lat: lat,
+        p_franjas_horarias: franjasHorarias ?? null,
+      },
     );
 
     if (error) {
