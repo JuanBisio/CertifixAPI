@@ -150,16 +150,20 @@ export class SubscriptionsService {
         throw new Error('MercadoPago no devolvió un id de preapproval');
       }
 
+      // F3 (claude-security 2026-08-11): no marcar la suscripción activa ni
+      // registrar un pago 'completed' antes de que MercadoPago confirme el
+      // cobro real. Acá solo se persiste lo que ya es un hecho (el preapproval
+      // quedó creado/actualizado con esta tarjeta) — suscripcion_activa,
+      // suscripcion_vence_at y el historial de pagos los decide
+      // syncPreapprovalStatus() re-consultando a MP, la misma función que usan
+      // el webhook y el cron de sincronización (nunca confiar en el body).
       const { error: updateError } = await supabase
         .from('perfiles_prestadores')
         .update({
           mp_preapproval_id: preapprovalId,
           suscripcion_card_last_four: dto.card_last_four,
           suscripcion_card_brand: dto.card_brand,
-          suscripcion_activa: true,
           suscripcion_cancelada: false,
-          suscripcion_vence_at: periodEnd.toISOString(),
-          ...(isNewPreapproval ? { suscripcion_charged_quantity: 1 } : {}),
         })
         .eq('id', prestadorId);
 
@@ -172,28 +176,10 @@ export class SubscriptionsService {
         );
       }
 
-      if (isNewPreapproval) {
-        // Registro optimista del primer pago — el webhook/cron reconcilia si MP tarda en confirmarlo.
-        const { error: paymentError } = await supabase
-          .from('suscripcion_pagos')
-          .insert({
-            prestador_id: prestadorId,
-            mp_preapproval_id: preapprovalId,
-            amount: SUBSCRIPTION_AMOUNT,
-            status: 'completed',
-            payment_method: dto.card_brand,
-            period_start: periodStart.toISOString(),
-            period_end: periodEnd.toISOString(),
-          });
-        if (paymentError) {
-          this.logger.error(
-            `Error guardando el primer pago de suscripcion_pagos: ${paymentError.message}`,
-          );
-        }
-      }
+      await this.syncPreapprovalStatus(preapprovalId);
 
       this.logger.log(
-        `Suscripción (preapproval ${preapprovalId}) activada para prestador ${prestadorId}`,
+        `Suscripción (preapproval ${preapprovalId}) creada/actualizada para prestador ${prestadorId}, sincronizando estado real con MercadoPago`,
       );
 
       return { success: true, vence_at: periodEnd.toISOString() };

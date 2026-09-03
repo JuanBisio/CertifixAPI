@@ -24,6 +24,7 @@ import {
 } from './dto/subscriptions.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { MercadoPagoWebhookGuard } from './guards/mercadopago-webhook.guard';
 import type { User } from '@supabase/supabase-js';
 
 @ApiTags('Subscriptions')
@@ -75,6 +76,7 @@ export class SubscriptionsController {
   }
 
   @Post('webhook')
+  @UseGuards(MercadoPagoWebhookGuard)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

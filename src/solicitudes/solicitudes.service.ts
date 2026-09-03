@@ -22,6 +22,13 @@ const FOTO_PROBLEMA_BUCKET = process.env.EVIDENCIAS_BUCKET || 'evidencias';
 const FOTO_PROBLEMA_MAX_BYTES = 3 * 1024 * 1024; // 3MB
 const FOTO_PROBLEMA_SIGNED_URL_SECONDS = 60 * 60 * 24 * 30; // 30 días
 
+// direccion_exacta/ubicacion_real viven en solicitudes_ubicacion_privada (RLS propia,
+// fuera de la publicación realtime — ver F1 en el reporte de seguridad). Este embed
+// las trae solo cuando el RLS de esa tabla lo permite (cliente dueño o prestador
+// asignado); sanitizeLocation() las aplana de vuelta al shape plano que espera mobile.
+const UBICACION_PRIVADA_EMBED =
+  'ubicacion_privada:solicitudes_ubicacion_privada(direccion_exacta, ubicacion_real)';
+
 @Injectable()
 export class SolicitudesService {
   private readonly logger = new Logger(SolicitudesService.name);
@@ -87,9 +94,7 @@ export class SolicitudesService {
         urgencia: dto.urgencia,
         franjas_horarias: dto.franjas_horarias ?? null,
         fecha_preferida: dto.fecha_preferida ?? null,
-        direccion_exacta: dto.direccion_exacta,
         zona_nombre: dto.zona_nombre,
-        ubicacion_real: `POINT(${lon} ${lat})`,
         ubicacion_difusa: `POINT(${lonDif} ${latDif})`,
         estado: 'buscando',
         timeout_at: timeoutAt,
@@ -105,6 +110,27 @@ export class SolicitudesService {
       this.logger.error(`Error creando solicitud: ${error.message}`);
       throw new BadRequestException('No se pudo crear la solicitud');
     }
+
+    // direccion_exacta/ubicacion_real viven en una tabla aparte (RLS propia,
+    // fuera de la publicación realtime) — ver F1 en el reporte de seguridad.
+    const { error: ubicacionError } = await supabase
+      .from('solicitudes_ubicacion_privada')
+      .insert({
+        solicitud_id: data.id,
+        direccion_exacta: dto.direccion_exacta,
+        ubicacion_real: `POINT(${lon} ${lat})`,
+      });
+
+    if (ubicacionError) {
+      this.logger.error(
+        `Error guardando ubicación privada de la solicitud ${data.id}: ${ubicacionError.message}`,
+      );
+      await supabase.from('solicitudes_trabajo').delete().eq('id', data.id);
+      throw new BadRequestException('No se pudo crear la solicitud');
+    }
+
+    data.direccion_exacta = dto.direccion_exacta;
+    data.ubicacion_real = `POINT(${lon} ${lat})`;
 
     void this.notificationsService.notifyPrestadoresParaSolicitud(
       dto.rubro_id,
@@ -205,7 +231,7 @@ export class SolicitudesService {
     let query = supabase
       .from('solicitudes_trabajo')
       .select(
-        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)',
+        `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre), ${UBICACION_PRIVADA_EMBED}`,
       )
       .order('created_at', { ascending: false });
 
@@ -290,7 +316,7 @@ export class SolicitudesService {
       const { data, error } = await supabase
         .from('solicitudes_trabajo')
         .select(
-          '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono)',
+          `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono), ${UBICACION_PRIVADA_EMBED}`,
         )
         .eq('prestador_id', userId)
         .in('estado', ['aceptado', 'en_camino', 'en_trabajo', 'finalizado'])
@@ -299,14 +325,19 @@ export class SolicitudesService {
       if (error) {
         throw new BadRequestException('Error obteniendo trabajos activos');
       }
-      return { solicitudes: data ?? [] };
+      // El prestador asignado siempre puede ver la dirección exacta de sus trabajos activos.
+      return {
+        solicitudes: (data ?? []).map((d: any) =>
+          this.sanitizeLocation(d, true),
+        ),
+      };
     }
 
     if (profile?.rol === 'cliente') {
       const { data, error } = await supabase
         .from('solicitudes_trabajo')
         .select(
-          '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre, telefono)',
+          `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre, telefono), ${UBICACION_PRIVADA_EMBED}`,
         )
         .eq('cliente_id', userId)
         .in('estado', [
@@ -323,7 +354,10 @@ export class SolicitudesService {
       if (error && error.code !== 'PGRST116') {
         throw new BadRequestException('Error obteniendo solicitud activa');
       }
-      return { solicitud: data ?? null };
+      // El cliente dueño siempre puede ver la dirección exacta de su propio trabajo.
+      return {
+        solicitud: data ? this.sanitizeLocation(data, true) : null,
+      };
     }
 
     throw new ForbiddenException('Rol no válido para este endpoint');
@@ -347,7 +381,7 @@ export class SolicitudesService {
     const { data, error } = await supabase
       .from('solicitudes_trabajo')
       .select(
-        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)',
+        `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre), ${UBICACION_PRIVADA_EMBED}`,
       )
       .eq('prestador_id', userId)
       .in('estado', ['finalizado', 'cerrado'])
@@ -355,7 +389,10 @@ export class SolicitudesService {
 
     if (error) throw new BadRequestException('Error obteniendo historial');
 
-    return { solicitudes: data ?? [] };
+    // El prestador asignado siempre puede ver la dirección exacta de sus trabajos pasados.
+    return {
+      solicitudes: (data ?? []).map((d: any) => this.sanitizeLocation(d, true)),
+    };
   }
 
   // ─── FIND ONE ─────────────────────────────────────────────────────────────
@@ -382,7 +419,7 @@ export class SolicitudesService {
     const { data, error } = await supabase
       .from('solicitudes_trabajo')
       .select(
-        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono), prestador:perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre)',
+        `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono), prestador:perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre), ${UBICACION_PRIVADA_EMBED}`,
       )
       .eq('id', id)
       .single();
@@ -505,7 +542,7 @@ export class SolicitudesService {
       .eq('id', solicitudId)
       .eq('estado', 'buscando')
       .is('prestador_id', null)
-      .select('*, rubros(id, nombre, icono)')
+      .select(`*, rubros(id, nombre, icono), ${UBICACION_PRIVADA_EMBED}`)
       .single();
 
     if (error || !updated) {
@@ -525,7 +562,8 @@ export class SolicitudesService {
     this.logger.log(
       `Solicitud ${solicitudId} aceptada por prestador ${prestadorId}`,
     );
-    return { solicitud: updated };
+    // El prestador recién asignado ya puede ver la dirección exacta.
+    return { solicitud: this.sanitizeLocation(updated, true) };
   }
 
   // ─── POSTULARSE (prestador, solo modo programado) ────────────────────────
@@ -737,7 +775,7 @@ export class SolicitudesService {
       .eq('id', solicitudId)
       .eq('estado', 'buscando')
       .is('prestador_id', null)
-      .select('*, rubros(id, nombre, icono)')
+      .select(`*, rubros(id, nombre, icono), ${UBICACION_PRIVADA_EMBED}`)
       .single();
 
     if (error || !updated) {
@@ -782,7 +820,8 @@ export class SolicitudesService {
     this.logger.log(
       `Solicitud ${solicitudId}: candidato ${candidatoId} elegido por cliente ${clienteId}`,
     );
-    return { solicitud: updated };
+    // El cliente dueño ya podía ver la dirección exacta desde que la creó.
+    return { solicitud: this.sanitizeLocation(updated, true) };
   }
 
   // ─── MIS POSTULACIONES (prestador) ───────────────────────────────────────
@@ -828,9 +867,12 @@ export class SolicitudesService {
       );
     }
 
+    // F2: un candidato no elegido no debe recibir la dirección exacta del
+    // cliente — sanitizeLocation(false) aplica el mismo criterio que
+    // findAll/findOne (solo el cliente dueño o el prestador asignado la ven).
     return {
       postulaciones: activas.map((c: any) => ({
-        ...c.solicitudes_trabajo,
+        ...this.sanitizeLocation(c.solicitudes_trabajo, false),
         candidato_id: c.id,
         mensajes_no_leidos: noLeidosPorCandidato[c.id] ?? 0,
       })),
@@ -900,7 +942,7 @@ export class SolicitudesService {
       .eq('id', id)
       .eq('estado', current)
       .select(
-        '*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre)',
+        `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre), ${UBICACION_PRIVADA_EMBED}`,
       )
       .single();
 
@@ -975,7 +1017,8 @@ export class SolicitudesService {
     }
 
     this.logger.log(`Solicitud ${id}: ${current} → ${dto.estado}`);
-    return { solicitud: data };
+    // El caller ya fue verificado como cliente dueño o prestador asignado (línea ~862).
+    return { solicitud: this.sanitizeLocation(data, true) };
   }
 
   // ─── CANCEL (cliente o prestador; 'buscando' solo cliente, 'aceptado' ambos) ─
@@ -1203,8 +1246,22 @@ export class SolicitudesService {
 
   // ─── HELPERS ──────────────────────────────────────────────────────────────
 
+  // direccion_exacta/ubicacion_real llegan (si acaso) anidadas bajo
+  // `ubicacion_privada` (embed a solicitudes_ubicacion_privada, RLS propia — ver
+  // F1). Esta función las aplana de vuelta al shape plano que espera mobile,
+  // y solo cuando canSeeExact es true — nunca confía en si el embed vino o no
+  // vino (RLS ya lo filtró aguas arriba, pero el criterio de la app es la
+  // fuente de verdad para decidir qué exponer).
   private sanitizeLocation(solicitud: any, canSeeExact: boolean) {
-    if (canSeeExact) return solicitud;
+    const { ubicacion_privada, ...rest } = solicitud;
+
+    if (canSeeExact) {
+      return {
+        ...rest,
+        direccion_exacta: ubicacion_privada?.direccion_exacta ?? null,
+        ubicacion_real: ubicacion_privada?.ubicacion_real ?? null,
+      };
+    }
 
     const approx = solicitud.ubicacion_difusa
       ? this.parsePoint(solicitud.ubicacion_difusa)
@@ -1214,7 +1271,7 @@ export class SolicitudesService {
       : null;
 
     return {
-      ...solicitud,
+      ...rest,
       direccion_exacta: null,
       coordenadas_privadas: null,
       ubicacion_real: null,
