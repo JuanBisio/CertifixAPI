@@ -30,24 +30,25 @@ export class RevocacionesService {
   ) {}
 
   // El ancla temporal de la ventana de arrepentimiento depende del rol:
-  // cliente → fecha de alta de cuenta; prestador → primer cobro efectivo
-  // de la suscripción (no el evento de "3er trabajo gratis completado").
+  // cliente → fecha de alta de cuenta; prestador → cobro efectivo más
+  // reciente de la suscripción (cada pago mensual es una nueva
+  // contratación y renueva la ventana de 10 días para ese cobro).
   private async derivarContratacion(
     supabase: SupabaseClient,
     userId: string,
     rol: string,
   ): Promise<Contratacion> {
     if (rol === 'prestador') {
-      const { data: primerPago } = await supabase
+      const { data: ultimoPago } = await supabase
         .from('suscripcion_pagos')
         .select('created_at')
         .eq('prestador_id', userId)
         .eq('status', 'completed')
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (!primerPago) {
+      if (!ultimoPago) {
         return {
           fecha_contratacion: null,
           tipo_revocado: 'La suscripción paga a CertiFix',
@@ -56,7 +57,7 @@ export class RevocacionesService {
       }
 
       return {
-        fecha_contratacion: primerPago.created_at,
+        fecha_contratacion: ultimoPago.created_at,
         tipo_revocado: 'La suscripción paga a CertiFix',
       };
     }

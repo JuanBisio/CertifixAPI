@@ -168,7 +168,7 @@ export class RatingsService {
     const { data, error } = await supabase
       .from('calificaciones')
       .select(
-        'puntuacion, comentario, created_at, comunicacion, puntualidad, atencion, eficiencia, clientes:cliente_id(nombre)',
+        'id, puntuacion, comentario, created_at, comunicacion, puntualidad, atencion, eficiencia, clientes:cliente_id(nombre)',
       )
       .eq('prestador_id', prestadorId)
       .order('created_at', { ascending: false });
