@@ -7,6 +7,7 @@ import {
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateEvidenciaDto } from './dto/create-evidencia.dto';
 import { randomUUID } from 'crypto';
+import { isFileContentAllowed } from '../common/utils/file-signature.util';
 
 @Injectable()
 export class EvidenciasService {
@@ -29,8 +30,16 @@ export class EvidenciasService {
         throw new BadRequestException('File is required');
       }
 
-      if (!file.mimetype?.startsWith('image/')) {
-        throw new BadRequestException('Solo se permiten imágenes');
+      const allowedMimetypes = new Set(['image/jpeg', 'image/png']);
+      if (!allowedMimetypes.has(file.mimetype)) {
+        throw new BadRequestException('Solo se permiten imágenes JPEG o PNG');
+      }
+      // El Content-Type declarado lo elige el cliente y es falseable — se
+      // valida además el contenido real vía magic bytes (F6).
+      if (!isFileContentAllowed(file.buffer, allowedMimetypes)) {
+        throw new BadRequestException(
+          'El contenido del archivo no coincide con el tipo declarado',
+        );
       }
 
       if (file.size && file.size > this.MAX_SIZE_BYTES) {

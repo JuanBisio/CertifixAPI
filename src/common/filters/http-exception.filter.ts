@@ -31,12 +31,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else {
         message = exceptionResponse;
       }
-    } else if (exception instanceof Error) {
-      message = exception.message;
     }
 
+    // Para excepciones no controladas (no-HttpException) no se devuelve
+    // exception.message al cliente — puede contener detalle interno (mensajes
+    // del driver de Postgres/Supabase, fragmentos de SQL, nombres de columna).
+    // Se loguea completo server-side; el cliente recibe el mensaje genérico.
+    const logMessage =
+      exception instanceof Error ? exception.message : message;
     this.logger.error(
-      `${request.method} ${request.url} - Status: ${status} - Message: ${message}`,
+      `${request.method} ${request.url} - Status: ${status} - Message: ${logMessage}`,
       exception instanceof Error ? exception.stack : undefined,
     );
 

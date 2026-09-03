@@ -75,12 +75,15 @@ export class CardsService {
   async saveCard(
     dto: SaveCardDto,
     userId: string,
+    userEmail: string,
   ): Promise<PaymentMethodResponseDto> {
     const supabase = this.supabaseService.getServiceClient();
 
     try {
-      // Get or create customer
-      const customerId = await this.getOrCreateCustomer(userId, dto.email);
+      // El email para MercadoPago se deriva del JWT autenticado, nunca del
+      // body (ver hallazgo F4) — evita que un usuario cruce/pollucione un
+      // customer de MP ajeno pasando el email de otra persona.
+      const customerId = await this.getOrCreateCustomer(userId, userEmail);
 
       // Associate card with customer
       const card = await this.customerClient.createCard({

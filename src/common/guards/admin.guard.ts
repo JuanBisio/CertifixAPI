@@ -48,12 +48,19 @@ export class AdminGuard implements CanActivate {
         return true;
       }
 
-      // Fallback: allow list from env (comma-separated emails)
+      // Fallback: allow list from env (comma-separated emails). Requiere
+      // email_confirmed_at: si el proyecto de Supabase tuviera la confirmación
+      // de email deshabilitada, cualquiera podría registrarse con un email del
+      // allowlist (sin ser su dueño) y obtener admin — ver hallazgo F8.
       const allowList =
         process.env.ADMIN_EMAILS?.split(',').map((e) =>
           e.trim().toLowerCase(),
         ) || [];
-      if (user.email && allowList.includes(user.email.toLowerCase())) {
+      if (
+        user.email &&
+        user.email_confirmed_at &&
+        allowList.includes(user.email.toLowerCase())
+      ) {
         this.logger.log(`Admin access granted via allowlist for ${user.email}`);
         return true;
       }

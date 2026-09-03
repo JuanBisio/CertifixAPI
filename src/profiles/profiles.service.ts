@@ -10,6 +10,8 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreatePrestadorDto } from './dto/create-prestador.dto';
 import { UpdateDisponibilidadDto } from './dto/update-disponibilidad.dto';
 import { UpdateRcSeguroDto } from './dto/update-rc-seguro.dto';
+import { isFileContentAllowed } from '../common/utils/file-signature.util';
+import { randomUUID } from 'crypto';
 
 // Exportados para reuso en AccountDeletionCleanupService (borra los mismos
 // documentos/foto de storage al purgar una cuenta dada de baja).
@@ -383,14 +385,23 @@ export class ProfilesService {
     if (!file) {
       throw new BadRequestException('El archivo es requerido');
     }
-    const mimetypeValido =
-      this.ALLOWED_MIMETYPES.has(file.mimetype) ||
-      (PDF_ALLOWED_TYPES.has(tipo) && file.mimetype === 'application/pdf');
+    const allowedMimetypes = PDF_ALLOWED_TYPES.has(tipo)
+      ? new Set([...this.ALLOWED_MIMETYPES, 'application/pdf'])
+      : this.ALLOWED_MIMETYPES;
+    const mimetypeValido = allowedMimetypes.has(file.mimetype);
     if (!mimetypeValido) {
       const formatos = PDF_ALLOWED_TYPES.has(tipo)
         ? 'imágenes JPEG/PNG o PDF'
         : 'imágenes JPEG o PNG';
       throw new BadRequestException(`Solo se permiten ${formatos}`);
+    }
+    // El Content-Type declarado (file.mimetype) lo elige el cliente y es
+    // falseable — se valida además el contenido real vía magic bytes (F6),
+    // para que un archivo no-imagen etiquetado como imagen no pase.
+    if (!isFileContentAllowed(file.buffer, allowedMimetypes)) {
+      throw new BadRequestException(
+        'El contenido del archivo no coincide con el tipo declarado',
+      );
     }
     if (file.size && file.size > this.MAX_SIZE_BYTES) {
       throw new BadRequestException('El archivo supera el máximo de 5MB');
@@ -400,13 +411,21 @@ export class ProfilesService {
 
     const bucket = BUCKET_MAP[tipo];
     const column = COLUMN_MAP[tipo];
-    // fileName ya incluye Date.now(), nunca colisiona con un objeto existente
-    // — upsert:true no hace falta y rompe bajo RLS: Storage necesita poder
-    // leer (SELECT) el objeto para decidir insert vs. update, pero estos
-    // buckets no le dan SELECT a `authenticated` a propósito (solo signed
-    // URLs server-side), así que el upsert siempre fallaba con
-    // "new row violates row-level security policy" aun en un path nuevo.
-    const fileName = `${userId}/${tipo}_${Date.now()}_${file.originalname}`;
+    // fileName usa randomUUID (no el originalname crudo del cliente, ver
+    // hallazgo F6 — mismo patrón ya usado en evidencias.service.ts) y ya
+    // es único de por sí, nunca colisiona con un objeto existente — upsert:
+    // true no hace falta y rompe bajo RLS: Storage necesita poder leer
+    // (SELECT) el objeto para decidir insert vs. update, pero estos buckets
+    // no le dan SELECT a `authenticated` a propósito (solo signed URLs
+    // server-side), así que el upsert siempre fallaba con "new row violates
+    // row-level security policy" aun en un path nuevo.
+    const extension =
+      file.mimetype === 'application/pdf'
+        ? 'pdf'
+        : file.mimetype === 'image/png'
+          ? 'png'
+          : 'jpg';
+    const fileName = `${userId}/${tipo}_${Date.now()}_${randomUUID()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)

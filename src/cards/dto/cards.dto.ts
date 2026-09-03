@@ -10,9 +10,16 @@ export class SaveCardDto {
   @IsString()
   payment_method_id: string;
 
-  @ApiProperty({ description: 'Payer email address' })
+  // Ignorado server-side por seguridad (ver hallazgo F4): el email real para
+  // MercadoPago se deriva del JWT autenticado (CardsController), nunca de este
+  // campo — se mantiene opcional solo por compatibilidad con clientes viejos
+  // que todavía lo mandan en el body.
+  @ApiPropertyOptional({
+    description: 'Ignorado — el email se deriva del usuario autenticado',
+  })
+  @IsOptional()
   @IsString()
-  email: string;
+  email?: string;
 
   @ApiPropertyOptional({ description: 'Set as default payment method' })
   @IsOptional()

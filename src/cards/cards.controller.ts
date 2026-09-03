@@ -32,7 +32,8 @@ export class CardsController {
   @ApiResponse({ status: 201, type: PaymentMethodResponseDto })
   async saveCard(@Body() dto: SaveCardDto, @Req() req: Request) {
     const userId = (req as any).user?.id;
-    return this.cardsService.saveCard(dto, userId);
+    const userEmail = (req as any).user?.email;
+    return this.cardsService.saveCard(dto, userId, userEmail);
   }
 
   @Get()
