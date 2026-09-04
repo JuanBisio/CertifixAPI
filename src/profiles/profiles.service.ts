@@ -76,10 +76,17 @@ export class ProfilesService {
 
   mapPrestadorProfile(prestador: any) {
     if (!prestador) return undefined;
-    const { esta_verificado, url_certificacion, ...rest } = prestador;
+    const { url_certificacion, ...rest } = prestador;
     return {
-      ...rest,
-      verificado: esta_verificado,
+      ...rest, // ya incluye esta_verificado tal cual viene de la columna real
+      // Alias de compatibilidad: GET /profiles/:id siempre devolvió
+      // esta_verificado; GET /profiles/me (acá) lo devolvía únicamente como
+      // `verificado`, lo que obligaba a la app a saber qué nombre pedir según
+      // el endpoint (bug real: ver docs/ROADMAP.md). Se unifica a
+      // esta_verificado (el nombre de la columna, ya usado en todo el resto
+      // del código); `verificado` queda como alias hasta que la app deje de
+      // leerlo — grep `?.verificado` en certifix_mobile antes de sacarlo.
+      verificado: rest.esta_verificado,
       certificacion_url: url_certificacion,
     };
   }
@@ -192,7 +199,7 @@ export class ProfilesService {
     const { data: prestador } = await supabase
       .from('perfiles_prestadores')
       .select(
-        'rating, trabajos_completados, tipo_verificacion, esta_verificado, foto_perfil_url, prestador_rubros(rubro_id, rubros(id, nombre, icono))',
+        'rating, trabajos_completados, tipo_verificacion, esta_verificado, foto_perfil_url, biometric_capture_at, rc_verificado, rc_vencimiento, franjas_horarias, zona_nombre, radio_km, prestador_rubros(rubro_id, rubros(id, nombre, icono))',
       )
       .eq('id', prestadorId)
       .single();
@@ -217,6 +224,12 @@ export class ProfilesService {
           tipo_verificacion: prestador?.tipo_verificacion ?? 'estandar',
           esta_verificado: prestador?.esta_verificado ?? false,
           foto_perfil_url: prestador?.foto_perfil_url ?? null,
+          biometric_capture_at: prestador?.biometric_capture_at ?? null,
+          rc_verificado: prestador?.rc_verificado ?? false,
+          rc_vencimiento: prestador?.rc_vencimiento ?? null,
+          franjas_horarias: prestador?.franjas_horarias ?? null,
+          zona_nombre: prestador?.zona_nombre ?? null,
+          radio_km: prestador?.radio_km ?? null,
         },
         calificaciones: calificaciones ?? [],
       },

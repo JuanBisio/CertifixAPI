@@ -422,12 +422,19 @@ export class SolicitudesService {
     const { data, error } = await supabase
       .from('solicitudes_trabajo')
       .select(
-        `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono), prestador:perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre), ${UBICACION_PRIVADA_EMBED}`,
+        `*, rubros(id, nombre, icono), perfiles!solicitudes_trabajo_cliente_id_fkey(id, nombre, telefono), prestador:perfiles!solicitudes_trabajo_prestador_id_fkey(id, nombre, perfiles_prestadores(esta_verificado, rating, trabajos_completados, tipo_verificacion, foto_perfil_url)), ${UBICACION_PRIVADA_EMBED}`,
       )
       .eq('id', id)
       .single();
 
     if (error) throw new NotFoundException('Solicitud no encontrada');
+
+    // La app espera esta_verificado/rating/trabajos_completados/tipo_verificacion/
+    // foto_perfil_url directo en `solicitud.prestador` — viven en perfiles_prestadores,
+    // no en perfiles, así que el embed anidado de arriba los trae un nivel más adentro
+    // de lo que la app lee. Sin este aplanado, el sello de verificación del técnico
+    // asignado nunca se renderiza (job.prestador?.esta_verificado siempre undefined).
+    data.prestador = this.flattenPrestador(data.prestador);
 
     const isCliente = data.cliente_id === userId;
     const isPrestadorAsignado = data.prestador_id === userId;
@@ -1248,6 +1255,20 @@ export class SolicitudesService {
   }
 
   // ─── HELPERS ──────────────────────────────────────────────────────────────
+
+  // `perfiles_prestadores.id` es FK 1:1 a `perfiles.id` (no al revés), así que
+  // no se puede embeber directo desde `solicitudes_trabajo.prestador_id`
+  // (que apunta a `perfiles`) — hay que anidarlo un nivel más adentro del
+  // embed a `perfiles` y después aplanarlo acá, mismo criterio que
+  // `sanitizeLocation()`. Sin este aplanado, `prestador.esta_verificado`/
+  // `.rating`/etc quedan en `prestador.perfiles_prestadores.*`, que es donde
+  // Supabase los devuelve pero no donde la app los lee.
+  private flattenPrestador(prestador: any) {
+    if (!prestador) return prestador;
+    const { perfiles_prestadores, ...rest } = prestador;
+    if (!perfiles_prestadores) return rest;
+    return { ...rest, ...perfiles_prestadores };
+  }
 
   // direccion_exacta/ubicacion_real llegan (si acaso) anidadas bajo
   // `ubicacion_privada` (embed a solicitudes_ubicacion_privada, RLS propia — ver
