@@ -73,5 +73,15 @@ $$;
 -- Sin esto, recrear la función deja el WARN de Advisors
 -- function_search_path_mutable (la función original, de v1_sprint1_schema.sql,
 -- nunca lo tuvo fijo — se corrige de paso al tocarla).
+--
+-- BUG encontrado y corregido (2026-09-05): la primera versión de este fix
+-- puso `search_path = public, pg_temp` a secas, sin `extensions` — el schema
+-- donde vive la extensión PostGIS en Supabase (`pg_extension.extnamespace`).
+-- Como `SET search_path` a nivel de función se aplica siempre, sin importar
+-- el search_path de quien la invoca, esto rompía TODA llamada real al RPC
+-- con `type "geography" does not exist` — notifications.service.ts atrapa
+-- el error en silencio y cae a notifyPrestadoresFallback() (sin filtro de
+-- radio), así que el síntoma visible nunca fue un 500 sino que el matching
+-- geográfico llevaba roto desde que se aplicó esta misma migración.
 ALTER FUNCTION get_prestadores_para_solicitud(TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT[])
-  SET search_path = public, pg_temp;
+  SET search_path = public, extensions, pg_temp;
