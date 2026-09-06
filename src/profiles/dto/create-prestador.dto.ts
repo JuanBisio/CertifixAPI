@@ -2,12 +2,11 @@ import {
   IsArray,
   IsNumber,
   IsObject,
-  IsOptional,
   IsString,
   Matches,
   ValidateNested,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 class CoordenadasDto {
@@ -50,10 +49,9 @@ export class CreatePrestadorDto {
   @Type(() => FranjasHorariasDto)
   franjas_horarias: FranjasHorariasDto;
 
-  @ApiPropertyOptional({ example: { lon: -58.4261, lat: -34.5875 } })
-  @IsOptional()
+  @ApiProperty({ example: { lon: -58.4261, lat: -34.5875 } })
   @IsObject()
   @ValidateNested()
   @Type(() => CoordenadasDto)
-  coordenadas?: CoordenadasDto;
+  coordenadas: CoordenadasDto;
 }

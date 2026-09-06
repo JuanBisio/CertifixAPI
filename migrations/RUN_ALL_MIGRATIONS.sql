@@ -87,25 +87,9 @@ CREATE INDEX IF NOT EXISTS idx_calificaciones_prestador
   ON calificaciones (prestador_id);
 
 -- RPC: get_prestadores_para_solicitud
-CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
-  p_rubro_id  TEXT,
-  p_lon       DOUBLE PRECISION,
-  p_lat       DOUBLE PRECISION
-)
-RETURNS TABLE(user_id UUID) AS $$
-  SELECT pp.id AS user_id
-  FROM perfiles_prestadores pp
-  JOIN prestador_rubros pr ON pr.prestador_id = pp.id
-  WHERE pr.rubro_id = p_rubro_id
-    AND pp.disponible = true
-    AND pp.esta_verificado = true
-    AND pp.ubicacion_base IS NOT NULL
-    AND ST_DWithin(
-      pp.ubicacion_base::geography,
-      ST_SetSRID(ST_MakePoint(p_lon, p_lat), 4326)::geography,
-      pp.radio_km * 1000.0
-    )
-$$ LANGUAGE SQL STABLE;
+-- (definición temprana intencionalmente eliminada: quedaban 3 copias
+-- desactualizadas de esta función en este archivo, ver BLOQUE final más abajo
+-- para la definición vigente — sección 3.11 de docs/ROADMAP.md)
 
 -- RPC: recalcular_rating_prestador
 CREATE OR REPLACE FUNCTION recalcular_rating_prestador(p_prestador_id UUID)
@@ -324,26 +308,7 @@ WITH CHECK (auth.uid() = prestador_id);
 
 COMMENT ON TABLE suscripcion_pagos IS 'Historial de cobros de la suscripción mensual del prestador a CertiFix';
 
-CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
-  p_rubro_id  TEXT,
-  p_lon       DOUBLE PRECISION,
-  p_lat       DOUBLE PRECISION
-)
-RETURNS TABLE(user_id UUID) AS $$
-  SELECT pp.id AS user_id
-  FROM perfiles_prestadores pp
-  JOIN prestador_rubros pr ON pr.prestador_id = pp.id
-  WHERE pr.rubro_id = p_rubro_id
-    AND pp.disponible = true
-    AND pp.esta_verificado = true
-    AND pp.suscripcion_activa = true
-    AND pp.ubicacion_base IS NOT NULL
-    AND ST_DWithin(
-      pp.ubicacion_base::geography,
-      ST_SetSRID(ST_MakePoint(p_lon, p_lat), 4326)::geography,
-      pp.radio_km * 1000.0
-    )
-$$ LANGUAGE SQL STABLE;
+-- (definición intermedia de get_prestadores_para_solicitud eliminada, ver nota arriba)
 
 -- ──────────────────────────────────────────────────────────────
 -- BLOQUE N+1: Calificación mutua — el prestador también califica al cliente
@@ -416,12 +381,23 @@ ALTER TABLE perfiles_prestadores
   ADD COLUMN IF NOT EXISTS trabajos_gratis_usados INTEGER NOT NULL DEFAULT 0
     CHECK (trabajos_gratis_usados >= 0);
 
-CREATE OR REPLACE FUNCTION get_prestadores_para_solicitud(
-  p_rubro_id  TEXT,
-  p_lon       DOUBLE PRECISION,
-  p_lat       DOUBLE PRECISION
+-- Definición vigente (ver nodejs_space/migrations/add_franja_horaria_a_matching.sql):
+-- incluye filtro por franja horaria y el fix de search_path de la sección 3.11
+-- de docs/ROADMAP.md (sin `extensions` en el search_path, ST_DWithin fallaba
+-- con "type geography does not exist" y el matching caía al fallback sin
+-- filtro geográfico).
+DROP FUNCTION IF EXISTS get_prestadores_para_solicitud(TEXT, DOUBLE PRECISION, DOUBLE PRECISION);
+
+CREATE FUNCTION get_prestadores_para_solicitud(
+  p_rubro_id TEXT,
+  p_lon DOUBLE PRECISION,
+  p_lat DOUBLE PRECISION,
+  p_franjas_horarias TEXT[] DEFAULT NULL
 )
-RETURNS TABLE(user_id UUID) AS $$
+RETURNS TABLE(user_id UUID)
+LANGUAGE sql
+STABLE
+AS $$
   SELECT pp.id AS user_id
   FROM perfiles_prestadores pp
   JOIN prestador_rubros pr ON pr.prestador_id = pp.id
@@ -435,7 +411,33 @@ RETURNS TABLE(user_id UUID) AS $$
       ST_SetSRID(ST_MakePoint(p_lon, p_lat), 4326)::geography,
       pp.radio_km * 1000.0
     )
-$$ LANGUAGE SQL STABLE;
+    AND (
+      p_franjas_horarias IS NULL
+      OR array_length(p_franjas_horarias, 1) IS NULL
+      OR pp.franjas_horarias IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM unnest(p_franjas_horarias) AS franja
+        WHERE (pp.franjas_horarias->>'desde') < (
+                CASE franja
+                  WHEN 'manana' THEN '13:00'
+                  WHEN 'tarde' THEN '18:00'
+                  WHEN 'noche' THEN '22:00'
+                END
+              )
+          AND (pp.franjas_horarias->>'hasta') > (
+                CASE franja
+                  WHEN 'manana' THEN '08:00'
+                  WHEN 'tarde' THEN '13:00'
+                  WHEN 'noche' THEN '18:00'
+                END
+              )
+      )
+    )
+$$;
+
+ALTER FUNCTION get_prestadores_para_solicitud(TEXT, DOUBLE PRECISION, DOUBLE PRECISION, TEXT[])
+  SET search_path = public, extensions, pg_temp;
 
 CREATE OR REPLACE FUNCTION increment_trabajos_gratis_usados(p_prestador_id UUID)
 RETURNS VOID AS $$

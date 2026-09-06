@@ -238,6 +238,14 @@ export class SolicitudesService {
       )
       .order('created_at', { ascending: false });
 
+    // Ubicación/radio del prestador, usados después de la query para filtrar
+    // por distancia (ver más abajo) — get_prestadores_para_solicitud() ya hace
+    // este filtro para el push, pero esta lista (`GET /solicitudes` desde la
+    // pantalla "Solicitudes disponibles") no pasaba por esa RPC y no filtraba
+    // por geografía en absoluto, solo por rubro/estado.
+    let prestadorUbicacion: { lon: number; lat: number } | null = null;
+    let prestadorRadioKm = 10;
+
     if (profile.rol === 'cliente') {
       query = query.eq('cliente_id', userId);
     } else if (profile.rol === 'prestador') {
@@ -245,12 +253,19 @@ export class SolicitudesService {
 
       const { data: prestador } = await supabase
         .from('perfiles_prestadores')
-        .select('esta_verificado, disponible')
+        .select('esta_verificado, disponible, ubicacion_base, radio_km')
         .eq('id', userId)
         .single();
 
       if (!prestador?.esta_verificado || !prestador?.disponible)
         return { solicitudes: [] };
+
+      // Sin ubicación cargada no hay forma de acotar por radio — mismo
+      // criterio que get_prestadores_para_solicitud (`ubicacion_base IS NOT
+      // NULL`), para no mostrarle solicitudes de cualquier parte del país.
+      prestadorUbicacion = this.parsePoint(prestador.ubicacion_base);
+      if (!prestadorUbicacion) return { solicitudes: [] };
+      prestadorRadioKm = prestador.radio_km ?? 10;
 
       // Obtener los rubros del prestador
       const { data: rubros } = await supabase
@@ -268,6 +283,18 @@ export class SolicitudesService {
     if (error) throw new BadRequestException('Error obteniendo solicitudes');
 
     let filtered = data ?? [];
+
+    if (profile.rol === 'prestador' && prestadorUbicacion) {
+      const origen = prestadorUbicacion;
+      filtered = filtered.filter((d: any) => {
+        const coords = this.parsePoint(d.ubicacion_difusa);
+        if (!coords) return false;
+        return (
+          this.distanciaKm(origen.lon, origen.lat, coords.lon, coords.lat) <=
+          prestadorRadioKm
+        );
+      });
+    }
 
     if (profile.rol === 'prestador') {
       const programadoIds = filtered
@@ -1329,6 +1356,19 @@ export class SolicitudesService {
       );
     }
     return { lon: parts[0], lat: parts[1] };
+  }
+
+  // Distancia en km entre dos puntos lon/lat (fórmula de Haversine) — mismo
+  // criterio que NotificationsService.distanciaKm() para el fallback del push.
+  private distanciaKm(lon1: number, lat1: number, lon2: number, lat2: number) {
+    const R = 6371;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
   }
 
   private parsePoint(value: any): { lon: number; lat: number } | null {

@@ -95,10 +95,13 @@ export class NotificationsService {
 
     if (error) {
       this.logger.error(
-        `Error en RPC get_prestadores_para_solicitud: ${error.message}`,
+        `Error en RPC get_prestadores_para_solicitud: ${error.message} ` +
+          `(code=${error.code ?? '?'}, details=${error.details ?? '?'}, hint=${error.hint ?? '?'})`,
       );
-      // Fallback: notificar por rubro sin filtro geográfico si la función no existe aún
-      await this.notifyPrestadoresFallback(rubroId, accessToken, payload);
+      // Fallback: mismo criterio de rubro/disponibilidad, pero replicando el
+      // filtro geográfico de la RPC en TS (no hay ST_DWithin sin RPC) — evita
+      // repetir el bug de la sección 3.11: notificar a todo el país si la RPC falla.
+      await this.notifyPrestadoresFallback(rubroId, lon, lat, accessToken, payload);
       return;
     }
 
@@ -123,9 +126,13 @@ export class NotificationsService {
     );
   }
 
-  // Fallback: match solo por rubro (sin PostGIS) — usado durante migración
+  // Fallback si la RPC falla: mismo match por rubro/disponibilidad/suscripción,
+  // pero replicando el filtro geográfico (radio_km de cada prestador) en TS,
+  // ya que acá no podemos usar ST_DWithin de PostGIS.
   private async notifyPrestadoresFallback(
     rubroId: string,
+    lon: number,
+    lat: number,
     accessToken: string,
     payload: { title: string; body: string; data?: Record<string, any> },
   ) {
@@ -142,7 +149,7 @@ export class NotificationsService {
 
     const { data: disponibles } = await supabase
       .from('perfiles_prestadores')
-      .select('id')
+      .select('id, ubicacion_base, radio_km')
       .in('id', prestadorIds)
       .eq('disponible', true)
       .eq('esta_verificado', true)
@@ -150,7 +157,14 @@ export class NotificationsService {
         `suscripcion_activa.eq.true,trabajos_gratis_usados.lt.${TRABAJOS_GRATIS_LIMITE}`,
       );
 
-    const userIds = (disponibles ?? []).map((p: any) => p.id);
+    const userIds = (disponibles ?? [])
+      .filter((p: any) => {
+        const coords = this.parsePoint(p.ubicacion_base);
+        if (!coords) return false;
+        const radioKm = p.radio_km ?? 10;
+        return this.distanciaKm(lon, lat, coords.lon, coords.lat) <= radioKm;
+      })
+      .map((p: any) => p.id);
     if (!userIds.length) return;
 
     await this.notifyUsers(
@@ -160,6 +174,37 @@ export class NotificationsService {
       accessToken,
       payload.data,
     );
+  }
+
+  // Supabase devuelve las columnas geometry como GeoJSON ({ coordinates: [lon, lat] })
+  // o como WKT ("POINT(lon lat)") según el cliente/columna; soportamos ambos.
+  private parsePoint(
+    raw: unknown,
+  ): { lon: number; lat: number } | null {
+    if (!raw) return null;
+    if (typeof raw === 'object' && Array.isArray((raw as any).coordinates)) {
+      const [lon, lat] = (raw as any).coordinates;
+      return typeof lon === 'number' && typeof lat === 'number'
+        ? { lon, lat }
+        : null;
+    }
+    if (typeof raw === 'string') {
+      const match = raw.match(/POINT\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)/i);
+      if (match) return { lon: Number(match[1]), lat: Number(match[2]) };
+    }
+    return null;
+  }
+
+  // Distancia en km entre dos puntos lon/lat (fórmula de Haversine).
+  private distanciaKm(lon1: number, lat1: number, lon2: number, lat2: number) {
+    const R = 6371;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
   }
 
   private readonly maxPushAttempts = 3;

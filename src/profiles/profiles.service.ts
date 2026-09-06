@@ -255,9 +255,7 @@ export class ProfilesService {
       throw new BadRequestException('Uno o más rubros_ids son inválidos');
     }
 
-    const ubicacionBase = dto.coordenadas
-      ? `POINT(${dto.coordenadas.lon} ${dto.coordenadas.lat})`
-      : undefined;
+    const ubicacionBase = `POINT(${dto.coordenadas.lon} ${dto.coordenadas.lat})`;
 
     const { data: existente } = await supabase
       .from('perfiles_prestadores')
@@ -268,8 +266,8 @@ export class ProfilesService {
     const prestadorData: Record<string, any> = {
       id: userId,
       franjas_horarias: dto.franjas_horarias,
+      ubicacion_base: ubicacionBase,
     };
-    if (ubicacionBase) prestadorData.ubicacion_base = ubicacionBase;
     if (!existente) {
       // Alta inicial: estos campos solo se setean acá. Una edición posterior
       // (mismo endpoint) no debe revertir la verificación ni la disponibilidad.
