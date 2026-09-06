@@ -7,6 +7,7 @@ import {
 import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ProfilesService } from '../profiles/profiles.service';
 
 @Injectable()
@@ -304,5 +305,43 @@ export class AuthService {
       message:
         'Tu cuenta va a ser eliminada. Tus datos personales se van a suprimir dentro de los próximos 30 días.',
     };
+  }
+
+  // Cambio de contraseña autoservicio (perfil → Configuración). Se re-valida
+  // la contraseña actual con un signInWithPassword contra un cliente aparte
+  // (no el autenticado por accessToken) antes de aplicar la nueva — evita que
+  // alguien con una sesión ya abierta (token robado, dispositivo desbloqueado)
+  // pueda cambiar la contraseña sin conocer la actual.
+  async changePassword(
+    email: string,
+    accessToken: string,
+    dto: ChangePasswordDto,
+  ) {
+    const supabase = this.supabaseService.getClient();
+
+    const { error: reauthError } = await supabase.auth.signInWithPassword({
+      email,
+      password: dto.current_password,
+    });
+
+    if (reauthError) {
+      this.logger.warn(`Cambio de contraseña rechazado (email=${email}): contraseña actual incorrecta`);
+      throw new UnauthorizedException('La contraseña actual es incorrecta');
+    }
+
+    const authedClient = this.supabaseService.getAuthenticatedClient(accessToken);
+    const { error: updateError } = await authedClient.auth.updateUser({
+      password: dto.new_password,
+    });
+
+    if (updateError) {
+      this.logger.error(`Error al actualizar contraseña: ${updateError.message}`);
+      throw new BadRequestException(
+        updateError.message || 'No se pudo actualizar la contraseña',
+      );
+    }
+
+    this.logger.log(`Contraseña actualizada (email=${email})`);
+    return { message: 'Contraseña actualizada correctamente' };
   }
 }

@@ -2,11 +2,12 @@ import {
   IsArray,
   IsNumber,
   IsObject,
+  IsOptional,
   IsString,
   Matches,
   ValidateNested,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 class CoordenadasDto {
@@ -54,4 +55,12 @@ export class CreatePrestadorDto {
   @ValidateNested()
   @Type(() => CoordenadasDto)
   coordenadas: CoordenadasDto;
+
+  // PER-06: nombre legible de la zona elegida en el picker (búsqueda por
+  // dirección o "usar mi ubicación actual") — puramente informativo, no se usa
+  // para el matching (eso es ST_DWithin sobre `coordenadas`).
+  @ApiPropertyOptional({ example: 'Córdoba Capital' })
+  @IsOptional()
+  @IsString()
+  zona_nombre?: string;
 }

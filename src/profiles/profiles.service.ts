@@ -117,7 +117,21 @@ export class ProfilesService {
         'Error actualizando perfil: ' + error.message,
       );
 
-    return { profile: data };
+    // Bug real: esto devolvía solo la fila de `perfiles` (sin
+    // prestador_profile), y el mobile reemplaza su `authStore().profile`
+    // entero con lo que llega acá — un prestador que editaba su nombre o
+    // teléfono perdía `prestador_profile` del estado local (aunque seguía
+    // intacto en la base) y la pantalla de perfil volvía a mostrar el banner
+    // de "Completá tu perfil". Se arma la respuesta igual que getProfile().
+    const { data: prestador } = await supabase
+      .from('perfiles_prestadores')
+      .select('*, prestador_rubros(rubro_id, rubros(id, nombre, icono))')
+      .eq('id', profileId)
+      .single();
+
+    return {
+      profile: { ...data, prestador_profile: this.mapPrestadorProfile(prestador) },
+    };
   }
 
   async getProfile(userId: string, accessToken: string) {
@@ -268,6 +282,7 @@ export class ProfilesService {
       franjas_horarias: dto.franjas_horarias,
       ubicacion_base: ubicacionBase,
     };
+    if (dto.zona_nombre) prestadorData.zona_nombre = dto.zona_nombre;
     if (!existente) {
       // Alta inicial: estos campos solo se setean acá. Una edición posterior
       // (mismo endpoint) no debe revertir la verificación ni la disponibilidad.

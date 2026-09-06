@@ -1,4 +1,12 @@
-import { Controller, Post, Get, Body, UseGuards, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Put,
+  Get,
+  Body,
+  UseGuards,
+  Logger,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
@@ -9,6 +17,7 @@ import {
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { SupabaseAuthGuard } from '../common/guards/supabase-auth.guard';
 import {
   CurrentUser,
@@ -69,6 +78,24 @@ export class AuthController {
   ) {
     this.logger.log(`Get current user request: ${user.id}`);
     return this.authService.getCurrentUser(user.id, accessToken);
+  }
+
+  @Put('change-password')
+  @UseGuards(SupabaseAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Cambiar la contraseña del usuario autenticado (requiere la actual)',
+  })
+  @ApiResponse({ status: 200, description: 'Contraseña actualizada' })
+  @ApiResponse({ status: 401, description: 'Contraseña actual incorrecta' })
+  async changePassword(
+    @CurrentUser() user: User,
+    @AccessToken() accessToken: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    this.logger.log(`Change password request: ${user.id}`);
+    return this.authService.changePassword(user.email!, accessToken, dto);
   }
 
   @Post('account/delete-request')
