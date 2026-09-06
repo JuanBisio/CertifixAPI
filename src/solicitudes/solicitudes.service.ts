@@ -1154,6 +1154,23 @@ export class SolicitudesService {
         .eq('id', userId);
     }
 
+    // Reabrir el pool de candidatos (programado) implica borrar las postulaciones
+    // de la ronda anterior, no solo resetear el contador: `solicitud_candidatos`
+    // tiene UNIQUE(solicitud_id, prestador_id), así que un candidato 'elegido'/
+    // 'no_elegido' que quedara en la tabla le bloquearía para siempre volver a
+    // postularse a esta misma solicitud, y el cliente seguiría viéndolo como
+    // candidato activo aunque la decisión ya no valga. No hay policy de DELETE
+    // en `solicitud_candidatos` (por diseño: nadie borra sus propias filas vía
+    // RLS) — se usa el service client, igual que el resto de las operaciones
+    // privilegiadas de este método (strikes más abajo).
+    if (isPrestador && esProgramado) {
+      await this.supabaseService
+        .getServiceClient()
+        .from('solicitud_candidatos')
+        .delete()
+        .eq('solicitud_id', solicitudId);
+    }
+
     // ── Notificar a la contraparte ──
     if (!isPrestador) {
       if (solicitud.estado === 'buscando') {
