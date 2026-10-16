@@ -11,6 +11,14 @@ import { CreateSolicitudDto } from './dto/create-solicitud.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { randomUUID } from 'crypto';
+import {
+  PRIMERA_RONDA,
+  construirPayloadRonda,
+  esRondaDeRescate,
+  radioDeRonda,
+  radioEfectivoKm,
+} from './matching-rondas';
+import { distanciaKm, parsePoint } from '../common/utils/geo.util';
 
 // Modo PROGRAMADO: plazo para postularse y tope de candidatos contactados.
 export const POSTULACION_DEADLINE_MINUTES = 120;
@@ -132,34 +140,28 @@ export class SolicitudesService {
     data.direccion_exacta = dto.direccion_exacta;
     data.ubicacion_real = `POINT(${lon} ${lat})`;
 
-    void this.notificationsService.notifyPrestadoresParaSolicitud(
-      dto.rubro_id,
+    // SOL-04: ronda 1 de la escalera de radios. Las rondas siguientes las
+    // dispara SolicitudesTimeoutService (@Cron), no un timer en memoria.
+    void this.notificationsService.notifyPrestadoresParaSolicitud({
+      solicitudId: data.id,
+      rubroId: dto.rubro_id,
       lon,
       lat,
-      accessToken,
-      esProgramado
-        ? {
-            title: 'Nuevo trabajo programado',
-            body: `Postulate y coordiná el precio por chat: ${dto.descripcion.substring(0, 90)}`,
-            data: {
-              solicitudId: data.id,
-              rubroId: data.rubro_id,
-              estado: data.estado,
-            },
-          }
-        : {
-            title: 'Nuevo trabajo disponible',
-            body: dto.descripcion.substring(0, 120),
-            data: {
-              solicitudId: data.id,
-              rubroId: data.rubro_id,
-              estado: data.estado,
-            },
-          },
+      payload: construirPayloadRonda({
+        esProgramado,
+        descripcion: dto.descripcion,
+        solicitudId: data.id,
+        rubroId: data.rubro_id,
+        estado: data.estado,
+        ronda: PRIMERA_RONDA,
+      }),
       // HOR-02: solo el modo programado manda franja — el urgente no filtra
       // por horario (es "ahora mismo", nunca undefined/null en ese caso).
-      esProgramado ? dto.franjas_horarias : null,
-    );
+      franjasHorarias: esProgramado ? dto.franjas_horarias : null,
+      ronda: PRIMERA_RONDA,
+      radioKm: radioDeRonda(PRIMERA_RONDA),
+      ignorarRadioPrestador: esRondaDeRescate(PRIMERA_RONDA),
+    });
 
     this.logger.log(`Solicitud creada: ${data.id}`);
     return { solicitud: data };
@@ -243,6 +245,10 @@ export class SolicitudesService {
     // este filtro para el push, pero esta lista (`GET /solicitudes` desde la
     // pantalla "Solicitudes disponibles") no pasaba por esa RPC y no filtraba
     // por geografía en absoluto, solo por rubro/estado.
+    //
+    // SOL-04: además del radio del prestador, ahora pesa la ronda de matching
+    // en la que está CADA solicitud — si no, el prestador vería en la lista un
+    // trabajo al que todavía no lo pinchamos (o que nunca le vamos a pinchar).
     let prestadorUbicacion: { lon: number; lat: number } | null = null;
     let prestadorRadioKm = 10;
 
@@ -263,7 +269,7 @@ export class SolicitudesService {
       // Sin ubicación cargada no hay forma de acotar por radio — mismo
       // criterio que get_prestadores_para_solicitud (`ubicacion_base IS NOT
       // NULL`), para no mostrarle solicitudes de cualquier parte del país.
-      prestadorUbicacion = this.parsePoint(prestador.ubicacion_base);
+      prestadorUbicacion = parsePoint(prestador.ubicacion_base);
       if (!prestadorUbicacion) return { solicitudes: [] };
       prestadorRadioKm = prestador.radio_km ?? 10;
 
@@ -287,11 +293,17 @@ export class SolicitudesService {
     if (profile.rol === 'prestador' && prestadorUbicacion) {
       const origen = prestadorUbicacion;
       filtered = filtered.filter((d: any) => {
-        const coords = this.parsePoint(d.ubicacion_difusa);
+        const coords = parsePoint(d.ubicacion_difusa);
         if (!coords) return false;
+        // Mismo criterio que el CASE de radio del RPC y que el fallback del
+        // push (radioEfectivoKm): rondas normales achican al mínimo entre el
+        // radio de la ronda y el declarado; la ronda de rescate lo pisa.
+        const radio = radioEfectivoKm(
+          d.ronda_matching ?? PRIMERA_RONDA,
+          prestadorRadioKm,
+        );
         return (
-          this.distanciaKm(origen.lon, origen.lat, coords.lon, coords.lat) <=
-          prestadorRadioKm
+          distanciaKm(origen.lon, origen.lat, coords.lon, coords.lat) <= radio
         );
       });
     }
@@ -592,7 +604,6 @@ export class SolicitudesService {
       [solicitud.cliente_id],
       'Técnico en camino',
       'Un técnico aceptó tu solicitud y se está preparando.',
-      accessToken,
       { solicitudId, estado: 'aceptado' },
     );
 
@@ -689,7 +700,6 @@ export class SolicitudesService {
       [solicitud.cliente_id],
       'Nueva propuesta recibida',
       'Un técnico se postuló a tu solicitud. Mirá su perfil y coordiná por chat.',
-      accessToken,
       { solicitudId, estado: solicitud.estado },
     );
 
@@ -837,7 +847,6 @@ export class SolicitudesService {
       [candidato.prestador_id],
       '¡Fuiste elegido para este trabajo!',
       'El cliente te eligió. Coordiná los detalles finales por chat.',
-      accessToken,
       { solicitudId, estado: 'aceptado' },
     );
 
@@ -849,7 +858,6 @@ export class SolicitudesService {
         descartadoIds,
         'No fuiste elegido esta vez',
         'El cliente eligió a otro técnico para este trabajo.',
-        accessToken,
         { solicitudId },
       );
     }
@@ -1047,7 +1055,6 @@ export class SolicitudesService {
           [notifyTarget],
           msg.title,
           msg.body,
-          accessToken,
           { solicitudId: id, estado: dto.estado },
         );
       }
@@ -1215,7 +1222,6 @@ export class SolicitudesService {
             candidatoIds,
             'Solicitud cancelada',
             'El cliente canceló la solicitud a la que te habías postulado.',
-            accessToken,
             { solicitudId },
           );
         }
@@ -1224,7 +1230,6 @@ export class SolicitudesService {
           [solicitud.prestador_id],
           'El cliente canceló el trabajo',
           'El cliente canceló la solicitud que tenías aceptada.',
-          accessToken,
           { solicitudId },
         );
       }
@@ -1233,7 +1238,6 @@ export class SolicitudesService {
         [solicitud.cliente_id],
         'El técnico canceló el trabajo',
         'Tu técnico canceló el trabajo. Estamos buscando otro disponible.',
-        accessToken,
         { solicitudId, estado: 'buscando' },
       );
     }
@@ -1281,7 +1285,6 @@ export class SolicitudesService {
             [userId],
             'Tu cuenta fue suspendida',
             'Acumulaste 3 cancelaciones con penalización. Contactá a soporte para más información.',
-            accessToken,
             {},
           );
         }
@@ -1332,7 +1335,7 @@ export class SolicitudesService {
     }
 
     const approx = solicitud.ubicacion_difusa
-      ? this.parsePoint(solicitud.ubicacion_difusa)
+      ? parsePoint(solicitud.ubicacion_difusa)
       : null;
     const approxLabel = approx
       ? `Área aprox: ${approx.lon.toFixed(3)}, ${approx.lat.toFixed(3)} (±500m)`
@@ -1356,33 +1359,5 @@ export class SolicitudesService {
       );
     }
     return { lon: parts[0], lat: parts[1] };
-  }
-
-  // Distancia en km entre dos puntos lon/lat (fórmula de Haversine) — mismo
-  // criterio que NotificationsService.distanciaKm() para el fallback del push.
-  private distanciaKm(lon1: number, lat1: number, lon2: number, lat2: number) {
-    const R = 6371;
-    const toRad = (deg: number) => (deg * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
-  }
-
-  private parsePoint(value: any): { lon: number; lat: number } | null {
-    if (!value) return null;
-    if (typeof value === 'object' && Array.isArray(value.coordinates)) {
-      const [lon, lat] = value.coordinates;
-      if (!Number.isNaN(lon) && !Number.isNaN(lat))
-        return { lon: Number(lon), lat: Number(lat) };
-    }
-    const str = String(value);
-    const m = str.match(/POINT\((-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\)/i);
-    if (m) return { lon: Number(m[1]), lat: Number(m[2]) };
-    const m2 = str.match(/(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);
-    if (m2) return { lon: Number(m2[1]), lat: Number(m2[2]) };
-    return null;
   }
 }

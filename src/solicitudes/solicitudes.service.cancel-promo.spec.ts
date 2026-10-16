@@ -15,6 +15,7 @@ class FakeQueryBuilder {
   private eqFilters: Array<[string, any]> = [];
   private updateData?: Row;
   private insertData?: Row;
+  private deleting = false;
 
   constructor(
     private table: Map<string, Row>,
@@ -40,6 +41,11 @@ class FakeQueryBuilder {
     return this;
   }
 
+  delete() {
+    this.deleting = true;
+    return this;
+  }
+
   private matches(row: Row) {
     return this.eqFilters.every(([col, val]) => row[col] === val);
   }
@@ -48,13 +54,18 @@ class FakeQueryBuilder {
   // deja que single()/then() resuelvan el match+update sin interleaving.
   private execute(): { data: Row[]; error: null } {
     if (this.insertData) {
-      const id = this.insertData.id ?? `${this.tableName}-${this.table.size + 1}`;
+      const id =
+        this.insertData.id ?? `${this.tableName}-${this.table.size + 1}`;
       const row: Row = { id, ...this.insertData };
       this.table.set(id, row);
       return { data: [row], error: null };
     }
 
     const matched = [...this.table.values()].filter((row) => this.matches(row));
+    if (this.deleting) {
+      matched.forEach((row) => this.table.delete(row.id));
+      return { data: matched.map((r) => ({ ...r })), error: null };
+    }
     if (this.updateData) {
       matched.forEach((row) => Object.assign(row, this.updateData));
     }
@@ -166,9 +177,10 @@ describe('SolicitudesService.cancel — cancelación con consecuencias (CAN-02/0
     };
 
     notifyUsers = jest.fn().mockResolvedValue(undefined);
-    incrementStrikes = jest
-      .fn()
-      .mockReturnValue({ data: [{ strikes_count: 1, suspendido: false }], error: null });
+    incrementStrikes = jest.fn().mockReturnValue({
+      data: [{ strikes_count: 1, suspendido: false }],
+      error: null,
+    });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -191,7 +203,9 @@ describe('SolicitudesService.cancel — cancelación con consecuencias (CAN-02/0
 
     await service.cancel(SOLICITUD_ID, PRESTADOR_ID, 'token');
 
-    expect(incrementStrikes).toHaveBeenCalledWith({ p_perfil_id: PRESTADOR_ID });
+    expect(incrementStrikes).toHaveBeenCalledWith({
+      p_perfil_id: PRESTADOR_ID,
+    });
 
     const historial = [...db.strikes_historial.values()];
     expect(historial).toHaveLength(1);
@@ -227,7 +241,9 @@ describe('SolicitudesService.cancel — cancelación con consecuencias (CAN-02/0
 
     await service.cancel(SOLICITUD_ID, PRESTADOR_ID, 'token');
 
-    expect(incrementStrikes).toHaveBeenCalledWith({ p_perfil_id: PRESTADOR_ID });
+    expect(incrementStrikes).toHaveBeenCalledWith({
+      p_perfil_id: PRESTADOR_ID,
+    });
     expect(db.strikes_historial.size).toBe(1);
   });
 
@@ -244,7 +260,6 @@ describe('SolicitudesService.cancel — cancelación con consecuencias (CAN-02/0
       [PRESTADOR_ID],
       'Tu cuenta fue suspendida',
       expect.any(String),
-      'token',
       {},
     );
   });
@@ -290,7 +305,9 @@ describe('SolicitudesService.updateStatus — promo de lanzamiento (3 trabajos g
       evidencias: new Map(),
     };
 
-    incrementTrabajosGratis = jest.fn().mockReturnValue({ data: null, error: null });
+    incrementTrabajosGratis = jest
+      .fn()
+      .mockReturnValue({ data: null, error: null });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -315,7 +332,7 @@ describe('SolicitudesService.updateStatus — promo de lanzamiento (3 trabajos g
     await service.updateStatus(
       SOLICITUD_ID,
       PRESTADOR_ID,
-      { estado: 'finalizado' } as any,
+      { estado: 'finalizado' },
       'token',
     );
 
@@ -339,7 +356,7 @@ describe('SolicitudesService.updateStatus — promo de lanzamiento (3 trabajos g
     await service.updateStatus(
       SOLICITUD_ID,
       PRESTADOR_ID,
-      { estado: 'en_camino' } as any,
+      { estado: 'en_camino' },
       'token',
     );
 

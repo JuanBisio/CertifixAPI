@@ -204,7 +204,6 @@ export class RevocacionesService {
       [user.id],
       'Solicitud de arrepentimiento recibida',
       'Recibimos tu solicitud. El equipo de CertiFix la va a procesar en los próximos días.',
-      accessToken,
     );
 
     this.logger.log(`Solicitud de revocación creada para perfil ${user.id}`);

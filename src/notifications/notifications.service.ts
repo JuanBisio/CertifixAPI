@@ -2,6 +2,22 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { RegisterTokenDto } from './dto/register-token.dto';
 import { TRABAJOS_GRATIS_LIMITE } from '../subscriptions/subscriptions.service';
+import { distanciaKm, parsePoint } from '../common/utils/geo.util';
+
+export interface NotificarRondaParams {
+  solicitudId: string;
+  rubroId: string;
+  lon: number;
+  lat: number;
+  payload: { title: string; body: string; data?: Record<string, any> };
+  franjasHorarias?: string[] | null;
+  /** Número de ronda (1..N) — solo se usa para registrar y loguear. */
+  ronda: number;
+  /** Radio de esta ronda, en km (ver src/solicitudes/matching-rondas.ts). */
+  radioKm: number;
+  /** Última ronda: el radio de la ronda pisa el `radio_km` del prestador. */
+  ignorarRadioPrestador: boolean;
+}
 
 @Injectable()
 export class NotificationsService {
@@ -40,15 +56,25 @@ export class NotificationsService {
     return { message: 'Push token registrado', token: dto.expo_push_token };
   }
 
+  /**
+   * Busca los tokens de los destinatarios y les manda el push.
+   *
+   * La lectura de `expo_push_tokens` va SIEMPRE con el service client, nunca
+   * con el JWT del que dispara la notificación: la policy RLS de esa tabla es
+   * `user_id = auth.uid()` FOR ALL (migrations/create_expo_push_tokens.sql),
+   * así que con el token del actor esta query devuelve, como mucho, el token
+   * del propio actor — cero filas para cualquier push dirigido a otra persona.
+   * Quién puede notificar a quién ya lo decide el caller; acá solo se resuelve
+   * el token, que es una operación de sistema.
+   */
   async notifyUsers(
     userIds: string[],
     title: string,
     body: string,
-    accessToken: string,
     data?: Record<string, any>,
   ) {
     if (!userIds.length) return;
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    const supabase = this.supabaseService.getServiceClient();
 
     const { data: tokens, error } = await supabase
       .from('expo_push_tokens')
@@ -69,83 +95,167 @@ export class NotificationsService {
     );
   }
 
-  // Notifica a prestadores que coinciden por rubro Y radio PostGIS (función RPC en Supabase)
+  /**
+   * SOL-04 — notifica UNA ronda de matching de una solicitud: prestadores del
+   * rubro dentro del radio de la ronda (PostGIS vía RPC), excluyendo a los que
+   * ya recibieron el push en una ronda anterior.
+   *
+   * Devuelve cuántos prestadores NUEVOS se notificaron: el motor de rondas
+   * (SolicitudesTimeoutService) usa ese número para decidir cuánto esperar
+   * antes de ampliar.
+   */
   async notifyPrestadoresParaSolicitud(
-    rubroId: string,
-    lon: number,
-    lat: number,
-    accessToken: string,
-    payload: { title: string; body: string; data?: Record<string, any> },
-    franjasHorarias?: string[] | null,
-  ) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    params: NotificarRondaParams,
+  ): Promise<number> {
+    const {
+      solicitudId,
+      rubroId,
+      lon,
+      lat,
+      payload,
+      franjasHorarias,
+      ronda,
+      radioKm,
+      ignorarRadioPrestador,
+    } = params;
 
-    // Llama a la función RPC que hace el match PostGIS + prestador_rubros +
-    // franja horaria (HOR-02, solo aplica si la solicitud es programada y
-    // manda franjasHorarias — en urgente va undefined/null y no filtra nada).
+    // Todo el camino de matching usa el service client: corre tanto desde
+    // create() (con un cliente logueado) como desde el cron (sin ningún JWT),
+    // y decide a quién notificar, no lee datos "en nombre de" nadie.
+    const supabase = this.supabaseService.getServiceClient();
+
+    const yaNotificados = await this.prestadoresYaNotificados(solicitudId);
+
     const { data: prestadores, error } = await supabase.rpc(
       'get_prestadores_para_solicitud',
       {
         p_rubro_id: rubroId,
         p_lon: lon,
         p_lat: lat,
+        // HOR-02: solo el modo programado manda franja; en urgente va null y
+        // no filtra nada.
         p_franjas_horarias: franjasHorarias ?? null,
+        p_radio_km: radioKm,
+        p_ignorar_radio_prestador: ignorarRadioPrestador,
+        p_excluir_prestadores: yaNotificados.length ? yaNotificados : null,
       },
     );
+
+    let userIds: string[];
 
     if (error) {
       this.logger.error(
         `Error en RPC get_prestadores_para_solicitud: ${error.message} ` +
           `(code=${error.code ?? '?'}, details=${error.details ?? '?'}, hint=${error.hint ?? '?'})`,
       );
-      // Fallback: mismo criterio de rubro/disponibilidad, pero replicando el
-      // filtro geográfico de la RPC en TS (no hay ST_DWithin sin RPC) — evita
-      // repetir el bug de la sección 3.11: notificar a todo el país si la RPC falla.
-      await this.notifyPrestadoresFallback(rubroId, lon, lat, accessToken, payload);
-      return;
+      // Fallback: mismo criterio de rubro/disponibilidad y MISMO criterio de
+      // radio de ronda, replicando el filtro geográfico en TS (no hay
+      // ST_DWithin sin RPC) — evita repetir el bug de la sección 3.11/3.12:
+      // notificar a todo el país si la RPC falla.
+      userIds = await this.prestadoresFallback(
+        rubroId,
+        lon,
+        lat,
+        radioKm,
+        ignorarRadioPrestador,
+        yaNotificados,
+      );
+    } else {
+      userIds = (prestadores ?? []).map((p: any) => p.user_id).filter(Boolean);
     }
-
-    const userIds = (prestadores ?? [])
-      .map((p: any) => p.user_id)
-      .filter(Boolean);
 
     if (!userIds.length) {
-      this.logger.log('Sin prestadores disponibles en el área para notificar');
-      return;
+      this.logger.log(
+        `Ronda ${ronda} (${radioKm} km) de la solicitud ${solicitudId}: ` +
+          `sin prestadores nuevos para notificar`,
+      );
+      return 0;
     }
 
-    await this.notifyUsers(
-      userIds,
-      payload.title,
-      payload.body,
-      accessToken,
-      payload.data,
-    );
+    await this.registrarNotificados(solicitudId, userIds, ronda);
+
+    await this.notifyUsers(userIds, payload.title, payload.body, payload.data);
     this.logger.log(
-      `Push enviado a ${userIds.length} prestadores para rubro ${rubroId}`,
+      `Ronda ${ronda} (${radioKm} km${ignorarRadioPrestador ? ', rescate' : ''}) ` +
+        `de la solicitud ${solicitudId}: push a ${userIds.length} prestadores del rubro ${rubroId}`,
     );
+    return userIds.length;
   }
 
-  // Fallback si la RPC falla: mismo match por rubro/disponibilidad/suscripción,
-  // pero replicando el filtro geográfico (radio_km de cada prestador) en TS,
-  // ya que acá no podemos usar ST_DWithin de PostGIS.
-  private async notifyPrestadoresFallback(
+  /** Prestadores que ya recibieron el push de esta solicitud en alguna ronda. */
+  private async prestadoresYaNotificados(
+    solicitudId: string,
+  ): Promise<string[]> {
+    const supabase = this.supabaseService.getServiceClient();
+    const { data, error } = await supabase
+      .from('solicitud_notificaciones')
+      .select('prestador_id')
+      .eq('solicitud_id', solicitudId);
+
+    if (error) {
+      // Si esto falla preferimos re-notificar (molesto) antes que no notificar
+      // a nadie (funcionalmente roto), pero tiene que verse en los logs.
+      this.logger.error(
+        `Error leyendo solicitud_notificaciones de ${solicitudId}: ${error.message} ` +
+          `(code=${(error as any).code ?? '?'}, details=${(error as any).details ?? '?'}, hint=${(error as any).hint ?? '?'})`,
+      );
+      return [];
+    }
+    return (data ?? []).map((r: any) => r.prestador_id).filter(Boolean);
+  }
+
+  private async registrarNotificados(
+    solicitudId: string,
+    prestadorIds: string[],
+    ronda: number,
+  ) {
+    const supabase = this.supabaseService.getServiceClient();
+    const { error } = await supabase.from('solicitud_notificaciones').upsert(
+      prestadorIds.map((prestadorId) => ({
+        solicitud_id: solicitudId,
+        prestador_id: prestadorId,
+        ronda,
+      })),
+      { onConflict: 'solicitud_id,prestador_id', ignoreDuplicates: true },
+    );
+
+    if (error) {
+      this.logger.error(
+        `Error registrando notificados de la solicitud ${solicitudId} ` +
+          `(ronda ${ronda}): ${error.message} (code=${(error as any).code ?? '?'}, ` +
+          `details=${(error as any).details ?? '?'}, hint=${(error as any).hint ?? '?'})`,
+      );
+    }
+  }
+
+  /**
+   * Fallback si la RPC falla: mismo match por rubro/disponibilidad/suscripción,
+   * replicando en TS el radio efectivo de la ronda (ver `radioEfectivoKm()` en
+   * src/solicitudes/matching-rondas.ts, mismo criterio que el CASE del RPC y
+   * que el filtro Haversine de SolicitudesService.findAll()).
+   */
+  private async prestadoresFallback(
     rubroId: string,
     lon: number,
     lat: number,
-    accessToken: string,
-    payload: { title: string; body: string; data?: Record<string, any> },
-  ) {
-    const supabase = this.supabaseService.getAuthenticatedClient(accessToken);
+    radioKm: number,
+    ignorarRadioPrestador: boolean,
+    excluir: string[],
+  ): Promise<string[]> {
+    const supabase = this.supabaseService.getServiceClient();
 
     const { data: prestadores, error } = await supabase
       .from('prestador_rubros')
       .select('prestador_id')
       .eq('rubro_id', rubroId);
 
-    if (error || !prestadores?.length) return;
+    if (error || !prestadores?.length) return [];
 
-    const prestadorIds = prestadores.map((p: any) => p.prestador_id);
+    const excluidos = new Set(excluir);
+    const prestadorIds = prestadores
+      .map((p: any) => p.prestador_id)
+      .filter((id: string) => !excluidos.has(id));
+    if (!prestadorIds.length) return [];
 
     const { data: disponibles } = await supabase
       .from('perfiles_prestadores')
@@ -157,54 +267,16 @@ export class NotificationsService {
         `suscripcion_activa.eq.true,trabajos_gratis_usados.lt.${TRABAJOS_GRATIS_LIMITE}`,
       );
 
-    const userIds = (disponibles ?? [])
+    return (disponibles ?? [])
       .filter((p: any) => {
-        const coords = this.parsePoint(p.ubicacion_base);
+        const coords = parsePoint(p.ubicacion_base);
         if (!coords) return false;
-        const radioKm = p.radio_km ?? 10;
-        return this.distanciaKm(lon, lat, coords.lon, coords.lat) <= radioKm;
+        const radioEfectivo = ignorarRadioPrestador
+          ? radioKm
+          : Math.min(radioKm, p.radio_km ?? 10);
+        return distanciaKm(lon, lat, coords.lon, coords.lat) <= radioEfectivo;
       })
       .map((p: any) => p.id);
-    if (!userIds.length) return;
-
-    await this.notifyUsers(
-      userIds,
-      payload.title,
-      payload.body,
-      accessToken,
-      payload.data,
-    );
-  }
-
-  // Supabase devuelve las columnas geometry como GeoJSON ({ coordinates: [lon, lat] })
-  // o como WKT ("POINT(lon lat)") según el cliente/columna; soportamos ambos.
-  private parsePoint(
-    raw: unknown,
-  ): { lon: number; lat: number } | null {
-    if (!raw) return null;
-    if (typeof raw === 'object' && Array.isArray((raw as any).coordinates)) {
-      const [lon, lat] = (raw as any).coordinates;
-      return typeof lon === 'number' && typeof lat === 'number'
-        ? { lon, lat }
-        : null;
-    }
-    if (typeof raw === 'string') {
-      const match = raw.match(/POINT\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)/i);
-      if (match) return { lon: Number(match[1]), lat: Number(match[2]) };
-    }
-    return null;
-  }
-
-  // Distancia en km entre dos puntos lon/lat (fórmula de Haversine).
-  private distanciaKm(lon1: number, lat1: number, lon2: number, lat2: number) {
-    const R = 6371;
-    const toRad = (deg: number) => (deg * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
   }
 
   private readonly maxPushAttempts = 3;
