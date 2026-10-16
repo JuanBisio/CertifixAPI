@@ -9,6 +9,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ProfilesService } from '../profiles/profiles.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class AuthService {
@@ -17,6 +18,7 @@ export class AuthService {
   constructor(
     private supabaseService: SupabaseService,
     private profilesService: ProfilesService,
+    private subscriptionsService: SubscriptionsService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -287,6 +289,22 @@ export class AuthService {
       );
     }
 
+    // Si es prestador con suscripción vigente, se cancela el preapproval en MP
+    // para que no se le siga cobrando a una cuenta dada de baja. Un fallo acá
+    // no frena la baja (ya quedó registrada): se loguea para resolverlo a mano.
+    try {
+      const cancelada = await this.subscriptionsService.cancelIfActive(userId);
+      if (cancelada) {
+        this.logger.log(
+          `Suscripción cancelada por eliminación de cuenta: ${userId}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `No se pudo cancelar la suscripción al eliminar la cuenta ${userId}: ${err.message}`,
+      );
+    }
+
     // Invalida todas las sesiones activas (todos los dispositivos), no solo
     // la que hizo este request — requiere el admin client (service role).
     const { error: signOutError } = await supabase.auth.admin.signOut(
@@ -325,17 +343,22 @@ export class AuthService {
     });
 
     if (reauthError) {
-      this.logger.warn(`Cambio de contraseña rechazado (email=${email}): contraseña actual incorrecta`);
+      this.logger.warn(
+        `Cambio de contraseña rechazado (email=${email}): contraseña actual incorrecta`,
+      );
       throw new UnauthorizedException('La contraseña actual es incorrecta');
     }
 
-    const authedClient = this.supabaseService.getAuthenticatedClient(accessToken);
+    const authedClient =
+      this.supabaseService.getAuthenticatedClient(accessToken);
     const { error: updateError } = await authedClient.auth.updateUser({
       password: dto.new_password,
     });
 
     if (updateError) {
-      this.logger.error(`Error al actualizar contraseña: ${updateError.message}`);
+      this.logger.error(
+        `Error al actualizar contraseña: ${updateError.message}`,
+      );
       throw new BadRequestException(
         updateError.message || 'No se pudo actualizar la contraseña',
       );

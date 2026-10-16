@@ -13,6 +13,7 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
+  ApiBody,
 } from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
 import {
@@ -82,9 +83,20 @@ export class SubscriptionsController {
   @ApiOperation({
     summary: 'Webhook de notificaciones de MercadoPago (Preapproval)',
   })
+  @ApiBody({ type: PreapprovalWebhookDto })
   async webhook(
-    @Body() dto: PreapprovalWebhookDto,
+    // Body sin DTO a propósito: MercadoPago manda campos que no controlamos y
+    // que varían por tópico/versión (id, live_mode, entity, date_created,
+    // user_id, api_version...). Con un DTO, el ValidationPipe global
+    // (forbidNonWhitelisted) rechazaba con 400 todo webhook real. La firma ya
+    // la validó MercadoPagoWebhookGuard; acá solo se leen type/action/data.id.
+    @Body() body: Record<string, any>,
   ): Promise<{ success: boolean }> {
+    const dto: PreapprovalWebhookDto = {
+      type: typeof body?.type === 'string' ? body.type : undefined,
+      action: typeof body?.action === 'string' ? body.action : undefined,
+      data: body?.data?.id != null ? { id: String(body.data.id) } : undefined,
+    };
     return this.subscriptionsService.handleWebhook(dto);
   }
 }

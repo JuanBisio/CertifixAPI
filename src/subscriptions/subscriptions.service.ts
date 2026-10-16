@@ -13,7 +13,7 @@ import {
 export const SUBSCRIPTION_AMOUNT = 30000;
 export const TRABAJOS_GRATIS_LIMITE = 3;
 export const SUBSCRIPTION_PERIOD_DAYS = 30;
-const BACK_URL = 'https://certifix.app';
+const BACK_URL = 'https://certifix.com.ar';
 // Estados de un preapproval que no admiten reactivación — hay que crear uno nuevo.
 const TERMINAL_STATUSES = ['cancelled'];
 
@@ -226,6 +226,28 @@ export class SubscriptionsService {
     );
 
     return { success: true };
+  }
+
+  /**
+   * Cancela el preapproval de MP si el prestador tiene uno vigente sin cancelar.
+   * Usado por la baja de cuenta: sin esto MP seguiría cobrando la suscripción
+   * de una cuenta eliminada. No tira si no hay nada que cancelar.
+   */
+  async cancelIfActive(prestadorId: string): Promise<boolean> {
+    const supabase = this.supabaseService.getServiceClient();
+
+    const { data: prestador } = await supabase
+      .from('perfiles_prestadores')
+      .select('mp_preapproval_id, suscripcion_cancelada')
+      .eq('id', prestadorId)
+      .maybeSingle();
+
+    if (!prestador?.mp_preapproval_id || prestador.suscripcion_cancelada) {
+      return false;
+    }
+
+    await this.cancel(prestadorId);
+    return true;
   }
 
   async handleWebhook(

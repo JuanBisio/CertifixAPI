@@ -1,8 +1,9 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { createGlobalValidationPipe } from './common/pipes/global-validation.pipe';
 import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
@@ -24,16 +25,7 @@ async function bootstrap() {
   });
 
   // Global validation pipe
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
-    }),
-  );
+  app.useGlobalPipes(createGlobalValidationPipe());
 
   // Swagger configuration
   const isProduction = process.env.NODE_ENV === 'production';
